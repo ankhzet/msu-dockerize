@@ -1,5 +1,4 @@
 {
-  "//": "Bundled default server-config.json. The UI container entrypoint rewrites this on every start from environment variables. To customize, mount a different file at /opt/mangossuperui/server-config.json or override the env vars in .env.",
   "Logging": {
     "LogLevel": {
       "Default": "Information",
@@ -17,17 +16,17 @@
   },
 
   "Vmangos": {
-    "BinDirectory":      "/opt/superui-core/bin",
-    "LogDirectory":      "/opt/superui-core/logs",
-    "ConfigDirectory":   "/opt/superui-core/etc",
-    "MangosdProcess":    "mangosd",
-    "RealmdProcess":     "realmd",
-    "MangosdConfPath":   "/opt/superui-core/etc/mangosd.conf",
-    "LogsDir":           "/opt/superui-core/bin",
-    "DbcPath":           "/opt/superui-core/data/5875/dbc",
-    "MapsDataPath":      "/opt/superui-core/data/maps",
-    "ServerDataPath":    "/opt/superui-core/data",
-    "ClientDataPath":    "/data"
+    "BinDirectory":    "/opt/superui-core/bin",
+    "LogDirectory":    "/opt/superui-core/logs",
+    "ConfigDirectory": "/opt/superui-core/etc",
+    "MangosdProcess":  "mangosd-main",
+    "RealmdProcess":   "realmd-main",
+    "MangosdConfPath": "/opt/superui-core/etc/mangosd.conf",
+    "LogsDir":         "/opt/superui-core/bin",
+    "DbcPath":         "/opt/superui-core/data/5875/dbc",
+    "MapsDataPath":    "/opt/superui-core/data/maps",
+    "ServerDataPath":  "/opt/superui-core/data",
+    "ClientDataPath":  "/data/Data"
   },
 
   "RemoteAccess": {
@@ -37,6 +36,11 @@
     "Password": "Changeme123!",
     "ReconnectDelayMs": 3000,
     "CommandTimeoutMs":  5000
+  },
+
+  "SpellCreator": {
+    "Ollama": { "BaseUrl": "http://host.docker.internal:11434" },
+    "ComfyUI": { "Nodes": [] }
   },
 
   "Kestrel": {

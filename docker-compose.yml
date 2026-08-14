@@ -112,6 +112,11 @@ services:
     image: mangossuperui/ui:${MANGOS_SUPER_UI_VERSION:-v1.2}
     container_name: mangossuperui-web
     restart: unless-stopped
+    # Share the mangosd container's PID namespace so /proc inside the UI sees
+    # the actual mangosd-main / realmd-main processes. Without this, the UI's
+    # process-status checks always show "Offline" because they look up
+    # /proc/<pid>/comm in their own (empty) PID namespace.
+    pid: "service:mangosd"
     depends_on:
       mariadb:
         condition: service_healthy
@@ -132,9 +137,9 @@ services:
       RA_USERNAME: ${RA_USERNAME:-superui}
       RA_PASSWORD: ${RA_PASSWORD:-Changeme123!}
       RA_MIN_LEVEL: ${RA_MIN_LEVEL:-3}
-      MANGOSD_PROCESS_NAME: mangosd
-      REALMD_PROCESS_NAME: realmd
-      CLIENT_DATA_PATH: ${CLIENT_DATA_PATH:-/data}
+      MANGOSD_PROCESS_NAME: mangosd-main
+      REALMD_PROCESS_NAME: realmd-main
+      CLIENT_DATA_PATH: /data/Data
       OLLAMA_HOST: ${OLLAMA_HOST:-}
       COMFYUI_HOST: ${COMFYUI_HOST:-}
       MANGOS_SUPER_UI_VERSION: ${MANGOS_SUPER_UI_VERSION:-v1.2}

@@ -62,6 +62,10 @@ RUN set -eux; \
 
 # Drop the default config template
 COPY config/server-config.json $MANGOSSUPERUI_HOME/server-config.json
+# Override the bundled appsettings.json with our defaults (process names match
+# mangosd-main/realmd-main, and ClientDataPath points at /data/Data inside
+# the container, which is the bind-mounted WoW client root).
+COPY config/appsettings.json $MANGOSSUPERUI_HOME/appsettings.json
 COPY docker/ui/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 

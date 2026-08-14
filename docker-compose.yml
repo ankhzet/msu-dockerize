@@ -83,6 +83,11 @@ services:
       - core-data:/opt/superui-core/data
       - core-logs:/opt/superui-core/logs
       - core-run:/opt/superui-core/run
+      # The etc directory holds mangosd.conf and realmd.conf. It's shared with
+      # the superui container so the UI's Config Editor can read/write the
+      # server configs. The mangosd entrypoint seeds mangosd.conf from the
+      # bundled .dist template on first run.
+      - core-etc:/opt/superui-core/etc
       # Optional: mount the WoW 1.12.1 client Data/ directory to expose DBC, maps,
       # vmaps, mmaps. The entrypoint symlinks them into the server's data/ dir.
       - ${WOW_CLIENT_DATA:-/dev/null}:/data:ro
@@ -137,6 +142,9 @@ services:
       - ui-data:/opt/mangossuperui/data
       - ui-cache:/opt/mangossuperui/wwwroot/cache
       - ui-patches:/opt/mangossuperui/wwwroot/patches
+      # Shared with mangosd so the UI's Config Editor can read/write
+      # mangosd.conf and realmd.conf (it reads via /Config/Load).
+      - core-etc:/opt/superui-core/etc:ro
       - ./backups:/var/mangossuperui/backups
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:${UI_HTTP_PORT:-5000}/"]
@@ -220,6 +228,7 @@ volumes:
   core-data:
   core-logs:
   core-run:
+  core-etc:
   ui-data:
   ui-cache:
   ui-patches:

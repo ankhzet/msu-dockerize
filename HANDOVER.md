@@ -243,10 +243,48 @@ docker exec mangos-world-server sh -c 'cd / && ls /data | head'
 
 ## State snapshot at handover time
 
-- World DB: 2021-06-14 BrotAlnia dump loaded, 9566 creatures, 19683 items, 9196 gameobjects
-- Migrations applied to mangos: 432 (partial; stuck at "fail N on X" — ID extraction bug)
-- Migrations applied to other DBs: characters=7, realmd=6, logs=9
+- World DB: 2021-06-14 BrotAlnia dump loaded, 169 tables, 9566 creatures, 19683 items, 9196 gameobjects
+- Migrations applied to mangos: 2444 (all of `old_migrations/` + `migrations/`)
+- Migrations applied to other DBs: characters=19, realmd=11, logs=9
 - DBC/maps/vmaps: extracted to `/opt/superui-core/data/{dbc,maps,vmaps,Cameras}` via `vmaps-extract` one-shot
 - WoW client mounted at `/data` in mangosd container (via `WOW_CLIENT_DATA=D:/Games/Blizzard/Vanilla`)
-- mangosd and realmd run but mangosd fails with schema errors (Unknown column errors)
+- mangosd + realmd running, RA listener on 3443, world server on 8085
+- MangosSuperUI dashboard reachable at http://localhost:5000
+- RA account `superui` / `Changeme123!` exists with gmlevel 6 (in realmd.account_access)
+
+### Key fixes applied during this handover
+
+1. **apply-migrations.sh ID extraction** — `id="${f%.sql}"` left the `_world` suffix on the ID and dedupe check always failed. Fixed with `sed -E 's/_(world|characters|logs|logon)\.sql$//'`.
+2. **world DB reloaded from scratch** with `world-2021.7z` (June 2021 dump), then 2444 migrations applied.
+3. **Schema patches applied directly** — many old_migrations/ files have bugs (e.g. `add_migration` SP wrapper bails out on partial failure but the migration row was already inserted, leaving the schema mid-way). The dump's PascalCase columns also collided with migration expectations. Direct ALTER TABLE patches:
+   - `map_template`: rename all PascalCase columns to lowercase, drop `level_min`/`level_max` (mangosd expects exactly 11 columns)
+   - `creature_equip_template`: ADD COLUMN `patch_min`/`patch_max` (mangosd queries `WHERE 10 BETWEEN patch_min AND patch_max`)
+   - `creature_spells`: ADD COLUMN `targetParam1_N`/`targetParam2_N` for N=1..8
+   - `creature_spells_scripts`: ADD COLUMN `target_param1`/`target_param2`/`target_type`/`condition_id`
+   - `instance_buff_removal`: rename `mapId`→`map_id`, `auraId`→`spell_id`
+   - `mangos.playerbot`: CREATE TABLE (fork's PlayerBotMgr queries it; binary has the references but the bot AI MODULES are missing)
+   - `characters.playerbot`: ADD COLUMN `race`, `class`, `level`, `map`, `position_x/y/z`, `name`
+4. **mangosd EOF-on-stdin shutdown** — the SuperUI-Core fork of mangosd reads from stdin in its main loop and treats EOF as `World::Stop()`. Confirmed via strace: `read(0,...) = 0`. systemd uses `StandardInput=tty-force`; in Docker we use a FIFO with `sleep infinity > /tmp/mangosd.console` as the holder process. Commands are sent via `echo 'cmd' > /tmp/mangosd.console`.
+
+### How to create the RA account
+
+```bash
+docker exec mangos-world-server sh -c '
+  printf ".account create superui Changeme123!\n" > /tmp/mangosd.console
+  sleep 1
+  printf ".account set gmlevel superui 6\n" > /tmp/mangosd.console
+'
+```
+
+The username is stored uppercase (`SUPERUI`) but the SRP6 hash uses the original case. The UI's `RemoteAccess.Username=superui` matches and authenticates.
+
+### How to verify the stack is up
+
+```bash
+sleep 8
+docker ps --format "table {{.Names}}\t{{.Status}}"
+docker exec mangos-world-server sh -c 'cat /proc/net/tcp | awk "\$4 == \"0A\" {print \$2}" | while read h; do printf "port %d\n" 0x${h##*:}; done'
+docker exec mangossuperui-web sh -c 'curl -s -o /dev/null -w "%{http_code}\n" http://localhost:5000/'
+docker exec mangos-world-server sh -c 'tail -5 /opt/superui-core/bin/Ra.log'  # should show `superui has logged in` periodically
+```
 - UI (`mangossuperui-web`) is healthy on http://localhost:5000 but shows mangosd.conf errors in its dashboard

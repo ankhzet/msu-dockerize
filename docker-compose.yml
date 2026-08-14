@@ -62,6 +62,8 @@ services:
     image: mangossuperui/core:${SUPERUI_CORE_VERSION:-latest}
     container_name: mangos-world-server
     restart: unless-stopped
+    tty: true
+    stdin_open: true
     depends_on:
       mariadb:
         condition: service_healthy

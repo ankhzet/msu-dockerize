@@ -158,8 +158,26 @@ START_REALMD() {
 # ---- Start mangosd (world) ----
 START_MANGOSD() {
     cd "$BIN"
-    "$BIN/mangosd" -c "$ETC/mangosd.conf" >> "$LOGS/mangosd.log" 2>&1 &
-    echo $! > /tmp/mangosd.pid
+    # The SuperUI-Core fork of mangosd reads from stdin in its main loop and
+    # treats EOF as a shutdown signal (strace confirms: `read(0,...) = 0`
+    # triggers World::Stop()). The systemd unit uses `StandardInput=tty-force`
+    # to keep stdin open. In Docker, we use a FIFO with a holder process so
+    # stdin never returns EOF. Commands can be sent via:
+    #   echo '.server info' > /tmp/mangosd.console
+    # from any shell in the container.
+    local fifo="/tmp/mangosd.console"
+    rm -f "$fifo"
+    mkfifo "$fifo"
+    # Holder: opens the FIFO for write and sleeps forever, keeping the fd open.
+    # Without this, mangosd would see EOF on the FIFO and shut down.
+    sleep infinity > "$fifo" &
+    local holder_pid=$!
+    disown
+    "$BIN/mangosd" -c "$ETC/mangosd.conf" < "$fifo" >> "$LOGS/mangosd.log" 2>&1 &
+    local mangosd_pid=$!
+    echo "$mangosd_pid" > /tmp/mangosd.pid
+    echo "$holder_pid" > /tmp/mangosd.holder_pid
+    echo "  Mangosd console FIFO: $fifo (write commands to it)"
 }
 
 # Trap signals for graceful shutdown
@@ -184,14 +202,14 @@ echo "  mangosd pid: $(cat /tmp/mangosd.pid)"
 echo "  Logs: $LOGS"
 echo "================================================"
 
-# Wait for either process to die - if one dies, tear down the other
+# Wait for realmd to die - mangosd is managed independently. The two share
+# the same config and a DB schema, but they're independent processes. If
+# realmd dies, something is fundamentally broken (e.g., DB connection lost)
+# so we tear down mangosd too. If mangosd dies alone, the UI's RA console
+# will see it disappear but the realm stays up via realmd.
 while true; do
     if ! kill -0 "$(cat /tmp/realmd.pid)" 2>/dev/null; then
-        echo "realmd exited"
-        break
-    fi
-    if ! kill -0 "$(cat /tmp/mangosd.pid)" 2>/dev/null; then
-        echo "mangosd exited"
+        echo "realmd exited - tearing down mangosd"
         break
     fi
     sleep 5

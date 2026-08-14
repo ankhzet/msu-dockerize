@@ -178,7 +178,7 @@ apply_migrations() {
         [[ -f "$f" ]] || continue
         local fname target_db id
         fname=$(basename "$f")
-        id="${fname%.sql}"
+        id=$(echo "$fname" | sed -E 's/_(world|characters|logs|logon)\.sql$//')
         case "$fname" in
             *_logon.sql)      target_db="realmd" ;;
             *_characters.sql) target_db="characters" ;;

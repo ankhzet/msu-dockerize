@@ -117,6 +117,50 @@ if [[ ! -f "$SQL_DIR/logon.sql" ]]; then
     echo "  logs.sql into ./vendor/sql/ manually if --standard/--full init fails."
 fi
 
+# ---- SuperUI-Core SQL migrations (mangosd refuses to start without these) ----
+echo
+echo "[3b/4] SuperUI-Core SQL migrations (mangosd refuses to start without these)"
+# Old pre-fork history (1436 files) + fork changes (1047 files). Without both,
+# migrations can fail because the fork assumes the baseline that
+# sql/old_migrations/ provides.
+fetch_dir_sql() {
+    # Fetches every .sql file from a GitHub repo directory using the Tree API,
+    # so we don't need a full git clone (~250 MB of historical SQL).
+    local ref="$1" remote_dir="$2" out_dir="$3" label="$4"
+    mkdir -p "$out_dir"
+    local existing
+    existing=$(ls "$out_dir"/*.sql 2>/dev/null | wc -l)
+    if [[ "$existing" -gt 0 && -z "$FORCE" ]]; then
+        echo "  [cached] $label: $existing files"
+        return
+    fi
+    local api="https://api.github.com/repos/Yafrovon/SuperUI-Core/git/trees/$ref?recursive=1"
+    echo "  Fetching $label listing from $ref..."
+    local listing
+    listing=$(curl -fsSL -H 'User-Agent: MangosSuperUI-Docker' "$api" 2>/dev/null || echo "")
+    if [[ -z "$listing" ]]; then
+        echo "  WARNING: could not fetch listing for $remote_dir; skip."
+        return
+    fi
+    # Extract raw blob URLs for files under <remote_dir>/*.sql
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        local path="${line#* }"
+        local fname
+        fname=$(basename "$path")
+        [[ -s "$out_dir/$fname" ]] && continue
+        local dl="https://raw.githubusercontent.com/Yafrovon/SuperUI-Core/$ref/$path"
+        if ! curl -fsSL --retry 2 --retry-delay 2 "$dl" -o "$out_dir/$fname" 2>/dev/null; then
+            echo "    [warn] failed: $fname"
+        fi
+    done < <(echo "$listing" \
+        | grep -oE '"path":[[:space:]]*"'"$remote_dir"'/[0-9]+_[a-z]+\.sql"' \
+        | sed -E 's|.*"path":[[:space:]]*"([^"]+)".*|\1|')
+    echo "  [ok] $label: $(ls "$out_dir"/*.sql 2>/dev/null | wc -l) files"
+}
+fetch_dir_sql "$SQL_TAG" "sql/old_migrations" "$SQL_DIR/old_migrations" "old_migrations"
+fetch_dir_sql "$SQL_TAG" "sql/migrations"     "$SQL_DIR/migrations"     "migrations"
+
 # ---- World DB ----
 echo
 if [[ "$SKIP_WORLD_DB" == "1" ]]; then

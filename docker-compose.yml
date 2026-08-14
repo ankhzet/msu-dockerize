@@ -144,9 +144,16 @@ services:
       - ui-data:/opt/mangossuperui/data
       - ui-cache:/opt/mangossuperui/wwwroot/cache
       - ui-patches:/opt/mangossuperui/wwwroot/patches
-      # Shared with mangosd so the UI's Config Editor can read/write
-      # mangosd.conf and realmd.conf (it reads via /Config/Load).
+      # Shared with mangosd so the UI can verify process status, read/write
+      # configs, and serve DBC/maps/vmaps/icons on demand from the same
+      # volumes mangosd uses.
       - core-etc:/opt/superui-core/etc:ro
+      - core-bin:/opt/superui-core/bin:ro
+      - core-data:/opt/superui-core/data:ro
+      - core-logs:/opt/superui-core/logs:ro
+      # WoW 1.12.1 client Data/ directory (mounted read-only). The UI serves
+      # icons, 3D models, and minimap tiles directly from the MPQs.
+      - ${WOW_CLIENT_DATA:-/dev/null}:/data:ro
       - ./backups:/var/mangossuperui/backups
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:5000/"]
@@ -289,6 +296,7 @@ volumes:
   core-data:
   core-logs:
   core-run:
+  core-bin:
   core-etc:
   ui-data:
   ui-cache:

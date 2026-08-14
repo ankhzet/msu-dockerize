@@ -68,10 +68,10 @@ save_artifact() {
 # ---- MangosSuperUI ----
 echo
 echo "[1/4] MangosSuperUI $MANGOS_SUPER_UI_VERSION"
-UI_URL=$(github_asset_url "Yafrovon/MangosSuperUI" "MangosSuperUI-linux-x64.zip" "$MANGOS_SUPER_UI_VERSION")
+UI_URL=$(github_asset_url "Yafrovon/MangosSuperUI" "LINUX" "$MANGOS_SUPER_UI_VERSION")
 if [[ -z "$UI_URL" ]]; then
     echo "  WARNING: asset not found, trying direct URL"
-    UI_URL="https://github.com/Yafrovon/MangosSuperUI/releases/download/${MANGOS_SUPER_UI_VERSION}/MangosSuperUI-linux-x64.zip"
+    UI_URL="https://github.com/Yafrovon/MangosSuperUI/releases/download/${MANGOS_SUPER_UI_VERSION}/MSUI---LINUX---v1.2.2.zip"
 fi
 # Derive a sensible filename from the URL
 UI_NAME=$(basename "$UI_URL")
@@ -80,34 +80,41 @@ save_artifact "$UI_URL" "$VENDOR/$UI_NAME"
 # ---- SuperUI-Core ----
 echo
 echo "[2/4] SuperUI-Core $SUPERUI_CORE_VERSION"
-CORE_URL=$(github_asset_url "Yafrovon/SuperUI-Core" ".tar.gz" "$SUPERUI_CORE_VERSION")
+# SuperUI-Core uses GitHub Actions auto-generated artifact names like 'dev-<sha>.zip'
+CORE_URL=$(github_asset_url "Yafrovon/SuperUI-Core" ".zip" "$SUPERUI_CORE_VERSION")
 if [[ -z "$CORE_URL" ]]; then
-    echo "  WARNING: no .tar.gz asset found. Check https://github.com/Yafrovon/SuperUI-Core/releases"
-    echo "  The asset may be named differently. Falling back to direct pattern."
-    CORE_URL="https://github.com/Yafrovon/SuperUI-Core/releases/latest/download/superui-core-linux.tar.gz"
+    echo "  WARNING: no .zip asset found. Check https://github.com/Yafrovon/SuperUI-Core/releases"
+    echo "  The asset may be named differently."
 fi
-CORE_NAME=$(basename "$CORE_URL")
-save_artifact "$CORE_URL" "$VENDOR/$CORE_NAME"
+if [[ -n "$CORE_URL" ]]; then
+    CORE_NAME=$(basename "$CORE_URL")
+    save_artifact "$CORE_URL" "$VENDOR/$CORE_NAME"
+fi
 
 # ---- SuperUI-Core SQL files (small, ~few MB) ----
 echo
 echo "[3/4] SuperUI-Core SQL schema files"
 SQL_TAG=$([[ "$SUPERUI_CORE_VERSION" == "latest" ]] && echo "development" || echo "$SUPERUI_CORE_VERSION")
-SQL_DIR="$VENDOR/sql/base"
+SQL_DIR="$VENDOR/sql"
 mkdir -p "$SQL_DIR"
 WANTED=("logon.sql" "realmd.sql" "characters.sql" "logs.sql" "mangos.sql")
-API="https://api.github.com/repos/Yafrovon/SuperUI-Core/contents/sql/base?ref=$SQL_TAG"
-SQL_LIST=$(curl -fsSL -H 'User-Agent: MangosSuperUI-Docker' "$API" 2>/dev/null || echo "")
-if [[ -n "$SQL_LIST" ]]; then
-    for fname in "${WANTED[@]}"; do
-        DL_URL=$(echo "$SQL_LIST" | grep -oE '"download_url"[[:space:]]*:[[:space:]]*"[^"]*'"$fname"'"' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
-        if [[ -n "$DL_URL" ]]; then
-            save_artifact "$DL_URL" "$SQL_DIR/$fname"
-        fi
-    done
-else
-    echo "  WARNING: could not fetch SQL file list. Place realmd.sql, characters.sql,"
-    echo "  logs.sql into ./vendor/sql/base/ manually if --standard/--full init fails."
+# Try sql/base/ first, fall back to sql/
+for api_path in "sql/base" "sql"; do
+    API="https://api.github.com/repos/Yafrovon/SuperUI-Core/contents/$api_path?ref=$SQL_TAG"
+    SQL_LIST=$(curl -fsSL -H 'User-Agent: MangosSuperUI-Docker' "$API" 2>/dev/null || echo "")
+    if [[ -n "$SQL_LIST" && "$SQL_LIST" != *"Not Found"* ]]; then
+        for fname in "${WANTED[@]}"; do
+            DL_URL=$(echo "$SQL_LIST" | grep -oE '"download_url"[[:space:]]*:[[:space:]]*"[^"]*'"$fname"'"' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
+            if [[ -n "$DL_URL" ]]; then
+                save_artifact "$DL_URL" "$SQL_DIR/$fname"
+            fi
+        done
+        break
+    fi
+done
+if [[ ! -f "$SQL_DIR/logon.sql" ]]; then
+    echo "  WARNING: could not fetch SQL files. Place realmd.sql, characters.sql,"
+    echo "  logs.sql into ./vendor/sql/ manually if --standard/--full init fails."
 fi
 
 # ---- World DB ----

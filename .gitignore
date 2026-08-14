@@ -9,8 +9,8 @@ vendor/*.7z
 vendor/*.tar.gz
 vendor/*.tar.xz
 vendor/*.tar.bz2
-vendor/sql/base/*.sql
-!vendor/sql/base/.gitkeep
+vendor/sql/*.sql
+!vendor/sql/.gitkeep
 vendor/CHANGELOG*
 vendor/README*.md
 !vendor/README.md

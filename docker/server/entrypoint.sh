@@ -34,20 +34,60 @@ for i in $(seq 1 60); do
     sleep 2
 done
 
-# Generate / patch configs from environment variables.
-# This is idempotent - the templates in /etc already have the right values,
-# but we re-templatize connection strings in case the user changed creds.
+# Verify the world DB schema has the `migrations` table. mangosd will refuse
+# to start without it (see INSTALL.md). In "bare" mode the user runs
+# `init-database.sh --standard` or `--full` to populate this.
+if command -v mariadb >/dev/null 2>&1; then
+    HAS_MIGRATIONS=$(mariadb -h "${MARIADB_HOST:-mariadb}" -P "${MARIADB_PORT:-3306}" \
+        -u "${MARIADB_USER:-mangos}" -p"${MARIADB_PASSWORD:-mangos}" \
+        -e "SHOW TABLES FROM ${MARIADB_DATABASE:-mangos} LIKE 'migrations';" \
+        -sN 2>/dev/null || echo "")
+    if [[ -z "$HAS_MIGRATIONS" ]]; then
+        echo ""
+        echo "==================================================================="
+        echo "  The 'mangos' schema is empty - mangosd will not start."
+        echo ""
+        echo "  Run on the HOST:"
+        echo "    ./scripts/init-database.sh --standard   # ~200MB download"
+        echo "    ./scripts/init-database.sh --full       # ~1GB download"
+        echo "    ./scripts/init-database.sh --from /path/to/world.7z"
+        echo ""
+        echo "  Then:  docker compose restart mangosd"
+        echo "==================================================================="
+        echo ""
+        # Loop forever so the container doesn't crash, but doesn't try to
+        # start mangosd until the DB is ready. Logs are still accessible.
+        while true; do sleep 3600; done
+    else
+        echo "  World DB migrations table present."
+    fi
+fi
+
+# Seed /etc/mangosd.conf and /etc/realmd.conf from the bundled .dist templates
+# (only on first run; user edits via the UI are written here as well).
+if [ ! -f "$ETC/mangosd.conf" ] && [ -f "$ETC/mangosd.conf.dist" ]; then
+    cp "$ETC/mangosd.conf.dist" "$ETC/mangosd.conf"
+    echo "Seeded $ETC/mangosd.conf from .dist template"
+fi
+if [ ! -f "$ETC/realmd.conf" ] && [ -f "$ETC/realmd.conf.dist" ]; then
+    cp "$ETC/realmd.conf.dist" "$ETC/realmd.conf"
+    echo "Seeded $ETC/realmd.conf from .dist template"
+fi
+
+# Apply environment-variable overrides to the configs.
 echo "Templating configs from environment..."
-sed -i "s|LoginDatabase.Info.*|LoginDatabase.Info = \"${MARIADB_HOST:-127.0.0.1};${MARIADB_PORT:-3306};${MARIADB_USER:-mangos};${MARIADB_PASSWORD:-mangos};realmd\"|" \
+sed -i "s|^LoginDatabase.Info.*|LoginDatabase.Info = \"${MARIADB_HOST:-127.0.0.1};${MARIADB_PORT:-3306};${MARIADB_USER:-mangos};${MARIADB_PASSWORD:-mangos};realmd\"|" \
     "$ETC/mangosd.conf" 2>/dev/null || true
-sed -i "s|WorldDatabase.Info.*|WorldDatabase.Info = \"${MARIADB_HOST:-127.0.0.1};${MARIADB_PORT:-3306};${MARIADB_USER:-mangos};${MARIADB_PASSWORD:-mangos};${MARIADB_DATABASE:-mangos}\"|" \
+sed -i "s|^WorldDatabase.Info.*|WorldDatabase.Info = \"${MARIADB_HOST:-127.0.0.1};${MARIADB_PORT:-3306};${MARIADB_USER:-mangos};${MARIADB_PASSWORD:-mangos};${MARIADB_DATABASE:-mangos}\"|" \
     "$ETC/mangosd.conf" 2>/dev/null || true
-sed -i "s|CharacterDatabase.Info.*|CharacterDatabase.Info = \"${MARIADB_HOST:-127.0.0.1};${MARIADB_PORT:-3306};${MARIADB_USER:-mangos};${MARIADB_PASSWORD:-mangos};characters\"|" \
+sed -i "s|^CharacterDatabase.Info.*|CharacterDatabase.Info = \"${MARIADB_HOST:-127.0.0.1};${MARIADB_PORT:-3306};${MARIADB_USER:-mangos};${MARIADB_PASSWORD:-mangos};characters\"|" \
     "$ETC/mangosd.conf" 2>/dev/null || true
-sed -i "s|LogsDatabase.Info.*|LogsDatabase.Info = \"${MARIADB_HOST:-127.0.0.1};${MARIADB_PORT:-3306};${MARIADB_USER:-mangos};${MARIADB_PASSWORD:-mangos};logs\"|" \
+sed -i "s|^LogsDatabase.Info.*|LogsDatabase.Info = \"${MARIADB_HOST:-127.0.0.1};${MARIADB_PORT:-3306};${MARIADB_USER:-mangos};${MARIADB_PASSWORD:-mangos};logs\"|" \
     "$ETC/mangosd.conf" 2>/dev/null || true
-sed -i "s|Ra.IP.*|Ra.IP = \"${RA_IP:-0.0.0.0}\"|"  "$ETC/mangosd.conf" 2>/dev/null || true
-sed -i "s|Ra.Port.*|Ra.Port = ${RA_PORT:-3443}|"     "$ETC/mangosd.conf" 2>/dev/null || true
+sed -i "s|^LoginDatabase.Info.*|LoginDatabase.Info = \"${MARIADB_HOST:-127.0.0.1};${MARIADB_PORT:-3306};${MARIADB_USER:-mangos};${MARIADB_PASSWORD:-mangos};realmd\"|" \
+    "$ETC/realmd.conf" 2>/dev/null || true
+sed -i "s|^Ra.IP.*|Ra.IP = \"${RA_IP:-0.0.0.0}\"|"  "$ETC/mangosd.conf" 2>/dev/null || true
+sed -i "s|^Ra.Port.*|Ra.Port = ${RA_PORT:-3443}|"     "$ETC/mangosd.conf" 2>/dev/null || true
 
 # Apply the critical VMaNGOS RA config (see INSTALL.md - Ra.MinLevel is REQUIRED)
 # Re-assert on every start so user overrides don't silently disable RA.

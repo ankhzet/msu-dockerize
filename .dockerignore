@@ -6,10 +6,6 @@
 *.suo
 
 # Local caches and secrets
-vendor/*.zip
-vendor/*.7z
-vendor/*.tar.gz
-vendor/*.tar.xz
 .env
 .env.local
 *.pem
@@ -21,6 +17,14 @@ backups/*
 logs/*
 !logs/.gitkeep
 data/
+
+# World DB archives (intentionally excluded so they're not baked into the
+# image - they're handled by init-database.sh at runtime instead).
+vendor/*.7z
+vendor/*.tar.gz
+vendor/*.tar.xz
+# NOTE: vendor/*.zip is NOT excluded - the MangosSuperUI + SuperUI-Core
+# prebuilt zips must be copied into the image at build time.
 
 # OS detritus
 .DS_Store

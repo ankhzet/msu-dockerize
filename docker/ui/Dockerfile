@@ -40,13 +40,11 @@ COPY vendor/ /vendor/
 
 # Install the prebuilt zip
 RUN set -eux; \
-    if ls /vendor/MangosSuperUI-linux-x64.zip >/dev/null 2>&1; then \
-        ZIP=$(ls /vendor/MangosSuperUI-linux-x64.zip | head -n1); \
-    else \
-        ZIP=$(ls /vendor/MangosSuperUI*.zip 2>/dev/null | head -n1 || true); \
-    fi; \
+    # Find MangosSuperUI Linux zip (vendor may have multiple zips, skip any
+    # that look like SuperUI-Core asset names)
+    ZIP=$(ls /vendor/*.zip 2>/dev/null | grep -E 'MSUI|MangosSuperUI' | head -n1); \
     if [[ -z "$ZIP" ]]; then \
-        echo "ERROR: no MangosSuperUI prebuilt zip found in /vendor/"; \
+        echo "ERROR: no MangosSuperUI Linux zip found in /vendor/"; \
         echo "Run ./scripts/download-artifacts.ps1 on the host first."; \
         exit 1; \
     fi; \
@@ -55,7 +53,7 @@ RUN set -eux; \
     unzip -q "$ZIP" -d $MANGOSSUPERUI_HOME; \
     # Verify the DLL is present
     test -f $MANGOSSUPERUI_HOME/MangosSuperUI.dll || \
-        (echo "ERROR: MangosSuperUI.dll not found after extraction"; exit 1); \
+        (echo "ERROR: MangosSuperUI.dll not found after extraction"; ls -la $MANGOSSUPERUI_HOME; exit 1); \
     # Create directories the app expects to write to
     mkdir -p $MANGOSSUPERUI_HOME/data \
              $MANGOSSUPERUI_HOME/wwwroot/cache \

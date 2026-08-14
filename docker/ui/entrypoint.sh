@@ -41,43 +41,46 @@ cat > "$CONFIG" <<EOF
     }
   },
   "AllowedHosts": "*",
-  "Mangos": {
-    "Connections": {
-      "Mangos":     "Server=${MARIADB_HOST:-mariadb};Port=${MARIADB_PORT:-3306};Database=${MARIADB_DATABASE:-mangos};User=${MARIADB_USER:-mangos};Password=${MARIADB_PASSWORD:-mangos};",
-      "Characters": "Server=${MARIADB_HOST:-mariadb};Port=${MARIADB_PORT:-3306};Database=characters;User=${MARIADB_USER:-mangos};Password=${MARIADB_PASSWORD:-mangos};",
-      "Realmd":     "Server=${MARIADB_HOST:-mariadb};Port=${MARIADB_PORT:-3306};Database=realmd;User=${MARIADB_USER:-mangos};Password=${MARIADB_PASSWORD:-mangos};",
-      "Logs":       "Server=${MARIADB_HOST:-mariadb};Port=${MARIADB_PORT:-3306};Database=logs;User=${MARIADB_USER:-mangos};Password=${MARIADB_PASSWORD:-mangos};",
-      "Admin":      "Server=${MARIADB_HOST:-mariadb};Port=${MARIADB_PORT:-3306};Database=${MANGOS_ADMIN_DB:-vmangos_admin};User=${MARIADB_USER:-mangos};Password=${MARIADB_PASSWORD:-mangos};"
-    },
-    "RemoteAccess": {
-      "Host": "${RA_HOST:-mangosd}",
-      "Port": ${RA_PORT:-3443},
-      "Username": "${RA_USERNAME:-superui}",
-      "Password": "${RA_PASSWORD:-Changeme123!}",
-      "TimeoutMs": 5000
-    },
-    "Paths": {
-      "BinDirectory":      "/opt/superui-core/bin",
-      "LogDirectory":      "/opt/superui-core/logs",
-      "ConfigDirectory":   "/opt/superui-core/etc",
-      "MangosdConfPath":   "/opt/superui-core/etc/mangosd.conf",
-      "DbcPath":           "/opt/superui-core/data/5875/dbc",
-      "MapsPath":          "/opt/superui-core/data/maps",
-      "DataDir":           "/opt/superui-core/data",
-      "MangosdProcessName": "${MANGOSD_PROCESS_NAME:-mangosd}",
-      "RealmdProcessName":  "${REALMD_PROCESS_NAME:-realmd}",
-      "ClientDataPath":    "${CLIENT_DATA_PATH:-/data}",
-      "ClientM2Path":      "${CLIENT_M2_PATH:-/data}",
-      "PatchOutputPath":   "/opt/mangossuperui/wwwroot/patches"
-    },
-    "WebServer": {
-      "Urls": "http://0.0.0.0:${UI_HTTP_PORT:-5000}"
-    },
-    "Ollama": {
-      "Host": "${OLLAMA_HOST:-}"
-    },
-    "ComfyUI": {
-      "Host": "${COMFYUI_HOST:-}"
+
+  "ConnectionStrings": {
+    "Mangos":     "Server=${MARIADB_HOST:-mariadb};Port=${MARIADB_PORT:-3306};Database=${MARIADB_DATABASE:-mangos};User=${MARIADB_USER:-mangos};Password=${MARIADB_PASSWORD:-mangos};",
+    "Characters": "Server=${MARIADB_HOST:-mariadb};Port=${MARIADB_PORT:-3306};Database=characters;User=${MARIADB_USER:-mangos};Password=${MARIADB_PASSWORD:-mangos};",
+    "Realmd":     "Server=${MARIADB_HOST:-mariadb};Port=${MARIADB_PORT:-3306};Database=realmd;User=${MARIADB_USER:-mangos};Password=${MARIADB_PASSWORD:-mangos};",
+    "Logs":       "Server=${MARIADB_HOST:-mariadb};Port=${MARIADB_PORT:-3306};Database=logs;User=${MARIADB_USER:-mangos};Password=${MARIADB_PASSWORD:-mangos};",
+    "Admin":      "Server=${MARIADB_HOST:-mariadb};Port=${MARIADB_PORT:-3306};Database=${MANGOS_ADMIN_DB:-vmangos_admin};User=${MARIADB_USER:-mangos};Password=${MARIADB_PASSWORD:-mangos};"
+  },
+
+  "Vmangos": {
+    "BinDirectory":    "/opt/superui-core/bin",
+    "LogDirectory":    "/opt/superui-core/logs",
+    "ConfigDirectory": "/opt/superui-core/etc",
+    "MangosdProcess":  "${MANGOSD_PROCESS_NAME:-mangosd}",
+    "RealmdProcess":   "${REALMD_PROCESS_NAME:-realmd}",
+    "MangosdConfPath": "/opt/superui-core/etc/mangosd.conf",
+    "LogsDir":         "/opt/superui-core/bin",
+    "DbcPath":         "/opt/superui-core/data/5875/dbc",
+    "MapsDataPath":    "/opt/superui-core/data/maps",
+    "ServerDataPath":  "/opt/superui-core/data",
+    "ClientDataPath":  "${CLIENT_DATA_PATH:-/data}"
+  },
+
+  "RemoteAccess": {
+    "Host": "${RA_HOST:-mangosd}",
+    "Port": ${RA_PORT:-3443},
+    "Username": "${RA_USERNAME:-superui}",
+    "Password": "${RA_PASSWORD:-Changeme123!}",
+    "ReconnectDelayMs": 3000,
+    "CommandTimeoutMs":  ${UI_HTTP_PORT:-5000}
+  },
+
+  "SpellCreator": {
+    "Ollama": { "BaseUrl": "${OLLAMA_HOST:-}" },
+    "ComfyUI": { "Nodes": [] }
+  },
+
+  "Kestrel": {
+    "Endpoints": {
+      "Http": { "Url": "http://0.0.0.0:${UI_HTTP_PORT:-5000}" }
     }
   }
 }

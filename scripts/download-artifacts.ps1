@@ -58,28 +58,36 @@ function Get-LatestAssetUrl {
         [Parameter(Mandatory)] [string]$AssetPattern,
         [string]$Tag
     )
-    $api = if ($Tag -and $Tag -ne 'latest') {
-        "https://api.github.com/repos/$Repo/releases/tags/$Tag"
-    } else {
-        "https://api.github.com/repos/$Repo/releases/latest"
-    }
-    Write-Host "  Querying: $api"
     $headers = @{ 'User-Agent' = 'MangosSuperUI-Docker' }
-    $release = Invoke-RestMethod -Uri $api -Headers $headers
-    $asset = $release.assets | Where-Object { $_.name -like $AssetPattern } | Select-Object -First 1
-    if (-not $asset) {
-        # Pre-release: query by tag with /latest (works for pre-releases too)
-        $apiPre = "https://api.github.com/repos/$Repo/releases?per_page=20"
-        $list = Invoke-RestMethod -Uri $apiPre -Headers $headers
-        foreach ($r in $list) {
-            $a = $r.assets | Where-Object { $_.name -like $AssetPattern } | Select-Object -First 1
-            if ($a) { $asset = $a; break }
+
+    # Try the tag-specific release first (works for both regular and pre-release tags)
+    $candidates = @()
+    if ($Tag -and $Tag -ne 'latest') {
+        $candidates += "https://api.github.com/repos/$Repo/releases/tags/$Tag"
+    }
+    # Always also try the listing (handles pre-release-only repos where
+    # /releases/latest returns 404)
+    $candidates += "https://api.github.com/repos/$Repo/releases?per_page=20"
+
+    foreach ($api in $candidates) {
+        Write-Host "  Querying: $api"
+        $release = $null
+        try {
+            $release = Invoke-RestMethod -Uri $api -Headers $headers
+        } catch {
+            Write-Host "    (skip: $((($_.Exception.Response.StatusCode).Value__)))" -ForegroundColor DarkGray
+            continue
+        }
+        # If the response is a list, walk it; if it's a single release, just check it
+        $releases = if ($release -is [array]) { $release } else { @($release) }
+        foreach ($r in $releases) {
+            $asset = $r.assets | Where-Object { $_.name -like $AssetPattern } | Select-Object -First 1
+            if ($asset) {
+                return $asset.browser_download_url, $asset.name, $asset.size
+            }
         }
     }
-    if (-not $asset) {
-        throw "No asset matching '$AssetPattern' found in $Repo (tag=$Tag)"
-    }
-    return $asset.browser_download_url, $asset.name, $asset.size
+    throw "No asset matching '$AssetPattern' found in $Repo (tag=$Tag)"
 }
 
 function Save-Artifact {
@@ -113,23 +121,25 @@ Write-Host "[1/4] MangosSuperUI $MANGOS_SUPER_UI_VERSION"
 try {
     $uiUrl, $uiName, $uiSize = Get-LatestAssetUrl `
         -Repo 'Yafrovon/MangosSuperUI' `
-        -AssetPattern 'MangosSuperUI-linux-x64.zip' `
+        -AssetPattern '*LINUX*.zip' `
         -Tag $MANGOS_SUPER_UI_VERSION
     Save-Artifact -Url $uiUrl -OutPath (Join-Path $vendor $uiName) -ExpectedSize $uiSize
 } catch {
     Write-Warning "  Failed: $_"
     Write-Warning "  Falling back to direct URL pattern (requires known tag)"
-    $fallback = "https://github.com/Yafrovon/MangosSuperUI/releases/download/$MANGOS_SUPER_UI_VERSION/MangosSuperUI-linux-x64.zip"
-    Save-Artifact -Url $fallback -OutPath (Join-Path $vendor 'MangosSuperUI-linux-x64.zip')
+    $fallback = "https://github.com/Yafrovon/MangosSuperUI/releases/download/$MANGOS_SUPER_UI_VERSION/MSUI---LINUX---v1.2.2.zip"
+    Save-Artifact -Url $fallback -OutPath (Join-Path $vendor 'MSUI---LINUX---v1.2.2.zip')
 }
 
 # ---------- SuperUI-Core ----------
 Write-Host ""
 Write-Host "[2/4] SuperUI-Core $SUPERUI_CORE_VERSION"
 try {
+    # SuperUI-Core uses GitHub Actions auto-generated artifact names
+    # like 'dev-<sha>.zip'. The `latest` tag is a rolling pre-release.
     $coreUrl, $coreName, $coreSize = Get-LatestAssetUrl `
         -Repo 'Yafrovon/SuperUI-Core' `
-        -AssetPattern '*.tar.gz' `
+        -AssetPattern '*.zip' `
         -Tag $SUPERUI_CORE_VERSION
     Save-Artifact -Url $coreUrl -OutPath (Join-Path $vendor $coreName) -ExpectedSize $coreSize
 } catch {
@@ -145,14 +155,29 @@ try {
 Write-Host ""
 Write-Host "[3/4] SuperUI-Core SQL schema files (small)"
 $sqlTag = if ($SUPERUI_CORE_VERSION -eq 'latest') { 'development' } else { $SUPERUI_CORE_VERSION }
-$sqlIndex = "https://api.github.com/repos/Yafrovon/SuperUI-Core/contents/sql/base?ref=$sqlTag"
-$sqlDir = Join-Path $vendor 'sql\base'
+$sqlDir = Join-Path $vendor 'sql'
 if (-not (Test-Path -LiteralPath $sqlDir)) {
     New-Item -ItemType Directory -Path $sqlDir -Force | Out-Null
 }
 try {
     $headers = @{ 'User-Agent' = 'MangosSuperUI-Docker' }
-    $files = Invoke-RestMethod -Uri $sqlIndex -Headers $headers
+    # Try the new layout first (sql/base/), then fall back to flat (sql/)
+    $candidates = @(
+        "https://api.github.com/repos/Yafrovon/SuperUI-Core/contents/sql/base?ref=$sqlTag",
+        "https://api.github.com/repos/Yafrovon/SuperUI-Core/contents/sql?ref=$sqlTag"
+    )
+    $files = $null
+    foreach ($api in $candidates) {
+        try {
+            $files = Invoke-RestMethod -Uri $api -Headers $headers
+            break
+        } catch {
+            continue
+        }
+    }
+    if ($null -eq $files) {
+        throw "Neither sql/base/ nor sql/ responded"
+    }
     $wanted = @('logon.sql', 'realmd.sql', 'characters.sql', 'logs.sql', 'mangos.sql')
     foreach ($f in $files) {
         if ($wanted -contains $f.name) {
@@ -163,7 +188,7 @@ try {
 } catch {
     Write-Warning "  Could not fetch SQL files via API: $_"
     Write-Warning "  The init-database.sh --bare / --standard / --full commands will fail"
-    Write-Warning "  until you place realmd.sql/characters.sql/logs.sql in ./vendor/sql/base/"
+    Write-Warning "  until you place realmd.sql/characters.sql/logs.sql in ./vendor/sql/"
 }
 
 # ---------- World DB (optional) ----------

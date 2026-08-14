@@ -51,21 +51,18 @@ db_exists() {
     mysql_exec -e "SELECT 1 FROM $1 LIMIT 1" >/dev/null 2>&1
 }
 
-# Source SQL files (realmd, characters, logs) from the SuperUI-Core's sql/base
+# Source SQL files (realmd, characters, logs) from the SuperUI-Core's sql/ dir
 # These are bundled with the server image (or the source repo).
-BUNDLED_SQL_DIR="${BUNDLED_SQL_DIR:-/opt/superui-core/sql/base}"
+BUNDLED_SQL_DIR="${BUNDLED_SQL_DIR:-/opt/superui-core/sql}"
 HOST_SQL_DIR="$INIT_DIR/sql"
-HOST_SQL_BASE_DIR="$INIT_DIR/sql/base"
-if [[ -d "$BUNDLED_SQL_DIR" && "$(ls -A "$BUNDLED_SQL_DIR" 2>/dev/null)" ]]; then
+if [[ -d "$BUNDLED_SQL_DIR" && "$(ls -A "$BUNDLED_SQL_DIR" 2>/dev/null | grep -v 'README\|\.gitkeep')" ]]; then
     SQL_DIR="$BUNDLED_SQL_DIR"
-elif [[ -d "$HOST_SQL_BASE_DIR" && "$(ls -A "$HOST_SQL_BASE_DIR" 2>/dev/null)" ]]; then
-    SQL_DIR="$HOST_SQL_BASE_DIR"
-elif [[ -d "$HOST_SQL_DIR" && "$(ls -A "$HOST_SQL_DIR" 2>/dev/null)" ]]; then
+elif [[ -d "$HOST_SQL_DIR" && "$(ls -A "$HOST_SQL_DIR" 2>/dev/null | grep -v 'README\|\.gitkeep')" ]]; then
     SQL_DIR="$HOST_SQL_DIR"
 else
     echo "WARNING: no SuperUI-Core SQL directory found."
-    echo "Expected either $BUNDLED_SQL_DIR or $HOST_SQL_BASE_DIR."
-    echo "Run ./scripts/download-artifacts.ps1 to populate ./vendor/sql/base/."
+    echo "Expected either $BUNDLED_SQL_DIR or $HOST_SQL_DIR."
+    echo "Run ./scripts/download-artifacts.ps1 to populate ./vendor/sql/."
     echo "Schemas will only be created as empty placeholders."
     SQL_DIR=""
 fi

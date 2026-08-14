@@ -287,4 +287,30 @@ docker exec mangos-world-server sh -c 'cat /proc/net/tcp | awk "\$4 == \"0A\" {p
 docker exec mangossuperui-web sh -c 'curl -s -o /dev/null -w "%{http_code}\n" http://localhost:5000/'
 docker exec mangos-world-server sh -c 'tail -5 /opt/superui-core/bin/Ra.log'  # should show `superui has logged in` periodically
 ```
-- UI (`mangossuperui-web`) is healthy on http://localhost:5000 but shows mangosd.conf errors in its dashboard
+
+### UI cross-container fixes (after initial boot)
+
+5. **World/Auth Server status: "Offline" in dashboard despite mangosd/realmd running** — the UI runs in its own PID namespace and can't see processes in `mangos-world-server`. Fix: `pid: "service:mangosd"` in `docker-compose.yml` makes the UI share mangos-world-server's PID namespace, so `/proc/<pid>/comm` shows `mangosd-main` and `realmd-main`.
+
+6. **MangosdProcess / RealmdProcess / ClientDataPath revert to defaults on every restart** — `docker/ui/entrypoint.sh` has a heredoc that always writes `server-config.json` from hardcoded defaults, overwriting whatever the Dockerfile `COPY` or a bind-mount provided. Fix: pass the right env vars in `docker-compose.yml`:
+   ```yaml
+   environment:
+     MANGOSD_PROCESS_NAME: mangosd-main
+     REALMD_PROCESS_NAME: realmd-main
+     CLIENT_DATA_PATH: /data/Data
+   ```
+   The entrypoint's heredoc interpolates these into `server-config.json` at startup. Also `COPY config/appsettings.json` in the Dockerfile as a static fallback so the bundled defaults also match.
+
+7. **ClientDataPath** must point at the WoW client's `Data/` folder (where the `*.MPQ` files live), NOT at the WoW root. Our mount is `WOW_CLIENT_DATA=D:/Games/Blizzard/Vanilla` which becomes `/data` in the container; `CLIENT_DATA_PATH` must be `/data/Data`.
+
+### Final state — dashboard should be all green
+
+- **World Server**: Online (PID visible via shared PID namespace, `pid: "service:mangosd"`)
+- **Auth Server**: Online
+- **Remote Access**: Connected (RA account `superui`/`Changeme123!` logs in every reconnect cycle; mangosd logs `Received command: .server info` every 30s)
+- **All 5 Databases**: Connected (mangos=177 tables, characters=66, realmd=15, logs=11, vmangos_admin=24)
+- **DBC Directory**: 158 *.dbc files at `/opt/superui-core/data/5875/dbc`
+- **Maps Directory**: 2429 *.map files at `/opt/superui-core/data/maps`
+- **Bin Directory**: `/opt/superui-core/bin`
+- **Client Data Path**: `/data/Data` (with base.MPQ, dbc.MPQ, etc.)
+- **Quick Command**: `.server info` returns `Server uptime: NN Seconds.` confirming live RA.

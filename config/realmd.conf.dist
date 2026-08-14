@@ -1,0 +1,32 @@
+###############################################################################
+# MangosSuperUI docker - realmd.conf (auth server) template
+# The login server needs only the realmd database connection. Everything else
+# is largely upstream defaults.
+###############################################################################
+
+[RealmdConf]
+ConfVersion=2020062301
+
+# Login database
+LoginDatabase.Info = "127.0.0.1;3306;mangos;mangos;realmd"
+
+# Listening port (WoW client connects here)
+BindIP = "0.0.0.0"
+Port = 3724
+
+# Logging
+LogFile = "realmd.log"
+LogLevel = 0
+LogTimestamp = "%Y-%m-%d %H:%M:%S"
+LogFileMaxSize = 0
+
+# Realm-list options
+RealmsStateUpdateDelay = 20
+WrongPass.MaxCount = 0
+WrongPass.BanTime = 600
+WrongPass.BanType = 0
+
+# Account creation
+AccountCreate.DefaultLevel = 0
+AccountCreate.MinLevel = 0
+AccountCreate.MaxLevel = 0

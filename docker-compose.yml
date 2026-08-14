@@ -1,0 +1,227 @@
+# =============================================================================
+# MangosSuperUI + SuperUI-Core Docker Compose Stack
+# =============================================================================
+# Usage:
+#   1. Copy .env.example to .env and edit
+#   2. ./scripts/download-artifacts.ps1     # pre-cache binaries on host
+#   3. docker compose build                 # assemble images
+#   4. docker compose up -d mariadb         # start DB first
+#   5. ./scripts/init-database.sh --bare    # or --standard / --full
+#   6. docker compose up -d                 # start everything
+#   7. Open http://localhost:5000
+#
+# Optional AI services (Ollama, ComfyUI) are gated behind the "ai" profile:
+#   docker compose --profile ai up -d
+# =============================================================================
+
+name: mangossuperui
+
+services:
+  # ---------------------------------------------------------------------------
+  # Database
+  # ---------------------------------------------------------------------------
+  mariadb:
+    image: mariadb:${MARIADB_VERSION:-10.11}
+    container_name: mangos-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-root}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-mangos}
+      MARIADB_USER: ${MARIADB_USER:-mangos}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-mangos}
+      TZ: ${TZ:-UTC}
+      MARIADB_AUTO_UPGRADE: "1"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max-allowed-packet=1G
+      - --innodb-buffer-pool-size=512M
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - superui-net
+
+  # ---------------------------------------------------------------------------
+  # Mangosd + realmd (world + auth servers) - SuperUI-Core
+  # Both processes run inside the same container by design - they share the
+  # same binary directory, same /data volume, and the same DB connection pool.
+  # (This matches the upstream VMaNGOS docs where both are run side by side.)
+  # ---------------------------------------------------------------------------
+  mangosd:
+    build:
+      context: .
+      dockerfile: docker/server/Dockerfile
+      args:
+        SUPERUI_CORE_VERSION: ${SUPERUI_CORE_VERSION:-latest}
+    image: mangossuperui/core:${SUPERUI_CORE_VERSION:-latest}
+    container_name: mangos-world-server
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-UTC}
+      MARIADB_HOST: mariadb
+      MARIADB_PORT: "3306"
+      MARIADB_USER: ${MARIADB_USER:-mangos}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-mangos}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-mangos}
+      RA_IP: ${RA_IP:-0.0.0.0}
+      RA_PORT: ${MANGOSD_RA_PORT:-3443}
+      RA_MIN_LEVEL: ${RA_MIN_LEVEL:-3}
+      SUPERUI_CORE_VERSION: ${SUPERUI_CORE_VERSION:-latest}
+    # RA port is exposed only to the host's localhost - never publicly
+    ports:
+      - "127.0.0.1:${MANGOSD_RA_PORT:-3443}:3443"
+    volumes:
+      - core-data:/opt/superui-core/data
+      - core-logs:/opt/superui-core/logs
+      - core-run:/opt/superui-core/run
+      # Optional: mount the WoW 1.12.1 client Data/ directory to expose DBC, maps,
+      # vmaps, mmaps. The entrypoint symlinks them into the server's data/ dir.
+      - ${WOW_CLIENT_DATA:-/dev/null}:/data:ro
+    cap_add:
+      - SYS_NICE  # higher process priority for smoother combat. Drop if it fails.
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - superui-net
+
+  # ---------------------------------------------------------------------------
+  # MangosSuperUI web UI
+  # ---------------------------------------------------------------------------
+  superui:
+    build:
+      context: .
+      dockerfile: docker/ui/Dockerfile
+      args:
+        MANGOS_SUPER_UI_VERSION: ${MANGOS_SUPER_UI_VERSION:-v1.2}
+    image: mangossuperui/ui:${MANGOS_SUPER_UI_VERSION:-v1.2}
+    container_name: mangossuperui-web
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      mangosd:
+        condition: service_started
+    environment:
+      ASPNETCORE_URLS: http://+:${UI_HTTP_PORT:-5000}
+      ASPNETCORE_ENVIRONMENT: Production
+      TZ: ${TZ:-UTC}
+      MARIADB_HOST: mariadb
+      MARIADB_PORT: "3306"
+      MARIADB_USER: ${MARIADB_USER:-mangos}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-mangos}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-mangos}
+      MANGOS_ADMIN_DB: ${MANGOS_ADMIN_DB:-vmangos_admin}
+      RA_HOST: mangosd
+      RA_PORT: ${MANGOSD_RA_PORT:-3443}
+      RA_USERNAME: ${RA_USERNAME:-superui}
+      RA_PASSWORD: ${RA_PASSWORD:-Changeme123!}
+      RA_MIN_LEVEL: ${RA_MIN_LEVEL:-3}
+      MANGOSD_PROCESS_NAME: mangosd
+      REALMD_PROCESS_NAME: realmd
+      CLIENT_DATA_PATH: ${CLIENT_DATA_PATH:-/data}
+      OLLAMA_HOST: ${OLLAMA_HOST:-}
+      COMFYUI_HOST: ${COMFYUI_HOST:-}
+      MANGOS_SUPER_UI_VERSION: ${MANGOS_SUPER_UI_VERSION:-v1.2}
+    ports:
+      - "${UI_HTTP_PORT:-5000}:${UI_HTTP_PORT:-5000}"
+    volumes:
+      - ui-data:/opt/mangossuperui/data
+      - ui-cache:/opt/mangossuperui/wwwroot/cache
+      - ui-patches:/opt/mangossuperui/wwwroot/patches
+      - ./backups:/var/mangossuperui/backups
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:${UI_HTTP_PORT:-5000}/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - superui-net
+
+  # ---------------------------------------------------------------------------
+  # Optional: Ollama (LLM for bot chat + spell creator prompts)
+  # Disabled by default. Enable with --profile ai.
+  # The image does NOT download anything at build time.
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: mangos-ollama
+    restart: unless-stopped
+    profiles: ["ai"]
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ollama-data:/root/.ollama
+    # On Windows / macOS, host.docker.internal reaches the host. On Linux,
+    # add `extra_hosts: ["host.docker.internal:host-gateway"]` if needed.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - superui-net
+
+  ollama-puller:
+    image: curlimages/curl:latest
+    container_name: mangos-ollama-puller
+    profiles: ["ai"]
+    depends_on:
+      - ollama
+    networks:
+      - superui-net
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Ollama to be reachable..."
+        for i in $$(seq 1 60); do
+          if curl -fsS http://ollama:11434/api/tags >/dev/null 2>&1; then
+            break
+          fi
+          sleep 2
+        done
+        echo "Pulling model ${OLLAMA_MODEL:-qwen3:4b} (this is on-demand; not at build time)..."
+        curl -fsS -X POST http://ollama:11434/api/pull \
+          -H 'Content-Type: application/json' \
+          -d "{\"name\":\"${OLLAMA_MODEL:-qwen3:4b}\"}" || echo "model pull failed; you can retry manually"
+        echo "Done."
+
+  # ---------------------------------------------------------------------------
+  # Optional: ComfyUI (image generation for spell creator / item retexture)
+  # Disabled by default. Enable with --profile ai.
+  # The image is NOT downloaded at build time - it's pulled at docker compose up.
+  # ---------------------------------------------------------------------------
+  comfyui:
+    image: yanwk/comfyui-boot:latest
+    container_name: mangos-comfyui
+    restart: unless-stopped
+    profiles: ["ai"]
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - comfyui-data:/root/ComfyUI
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - superui-net
+
+networks:
+  superui-net:
+    driver: bridge
+
+volumes:
+  mariadb-data:
+  core-data:
+  core-logs:
+  core-run:
+  ui-data:
+  ui-cache:
+  ui-patches:
+  ollama-data:
+  comfyui-data:

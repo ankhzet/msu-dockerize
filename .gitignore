@@ -1,0 +1,42 @@
+# Environments / secrets
+.env
+.env.local
+.env.*.local
+
+# Vendor / build cache (populated by scripts/download-artifacts.*)
+vendor/*.zip
+vendor/*.7z
+vendor/*.tar.gz
+vendor/*.tar.xz
+vendor/*.tar.bz2
+vendor/sql/base/*.sql
+!vendor/sql/base/.gitkeep
+vendor/CHANGELOG*
+vendor/README*.md
+!vendor/README.md
+vendor/superui-core-*
+vendor/MangosSuperUI-*
+
+# Backups
+backups/*
+!backups/.gitkeep
+
+# Runtime logs
+logs/*
+!logs/.gitkeep
+
+# IDE / editor
+.vs/
+.idea/
+*.user
+*.suo
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build outputs
+**/bin/
+**/obj/
+**/out/

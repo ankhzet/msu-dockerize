@@ -1,0 +1,44 @@
+{
+  "//": "Bundled default server-config.json. The UI container entrypoint rewrites this on every start from environment variables. To customize, mount a different file at /opt/mangossuperui/server-config.json or override the env vars in .env.",
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*",
+  "Mangos": {
+    "Connections": {
+      "Mangos":     "Server=mariadb;Port=3306;Database=mangos;User=mangos;Password=mangos;",
+      "Characters": "Server=mariadb;Port=3306;Database=characters;User=mangos;Password=mangos;",
+      "Realmd":     "Server=mariadb;Port=3306;Database=realmd;User=mangos;Password=mangos;",
+      "Logs":       "Server=mariadb;Port=3306;Database=logs;User=mangos;Password=mangos;",
+      "Admin":      "Server=mariadb;Port=3306;Database=vmangos_admin;User=mangos;Password=mangos;"
+    },
+    "RemoteAccess": {
+      "Host": "mangosd",
+      "Port": 3443,
+      "Username": "superui",
+      "Password": "Changeme123!",
+      "TimeoutMs": 5000
+    },
+    "Paths": {
+      "BinDirectory":       "/opt/superui-core/bin",
+      "LogDirectory":       "/opt/superui-core/logs",
+      "ConfigDirectory":    "/opt/superui-core/etc",
+      "MangosdConfPath":    "/opt/superui-core/etc/mangosd.conf",
+      "DbcPath":            "/opt/superui-core/data/5875/dbc",
+      "MapsPath":           "/opt/superui-core/data/maps",
+      "DataDir":            "/opt/superui-core/data",
+      "MangosdProcessName": "mangosd",
+      "RealmdProcessName":  "realmd",
+      "ClientDataPath":     "/data",
+      "PatchOutputPath":    "/opt/mangossuperui/wwwroot/patches"
+    },
+    "WebServer": {
+      "Urls": "http://0.0.0.0:5000"
+    },
+    "Ollama":  { "Host": "" },
+    "ComfyUI": { "Host": "" }
+  }
+}

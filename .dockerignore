@@ -1,0 +1,28 @@
+# Build artifacts
+**/bin/
+**/obj/
+**/.vs/
+**/*.user
+*.suo
+
+# Local caches and secrets
+vendor/*.zip
+vendor/*.7z
+vendor/*.tar.gz
+vendor/*.tar.xz
+.env
+.env.local
+*.pem
+*.key
+
+# Runtime data
+backups/*
+!backups/.gitkeep
+logs/*
+!logs/.gitkeep
+data/
+
+# OS detritus
+.DS_Store
+Thumbs.db
+desktop.ini

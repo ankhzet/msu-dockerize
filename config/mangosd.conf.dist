@@ -1,0 +1,81 @@
+###############################################################################
+# MangosSuperUI docker - mangosd.conf (world server) template
+# Adapted from VMaNGOS / SuperUI-Core defaults. The entrypoint.sh script
+# rewrites the connection strings and RA settings from environment variables.
+###############################################################################
+
+[MangosdConf]
+ConfVersion=2024052301
+
+# ----------------------------------------------------------------------------
+# Database connections
+# Format: "host;port;user;password;database"
+# ----------------------------------------------------------------------------
+LoginDatabase.Info     = "127.0.0.1;3306;mangos;mangos;realmd"
+WorldDatabase.Info     = "127.0.0.1;3306;mangos;mangos;mangos"
+CharacterDatabase.Info = "127.0.0.1;3306;mangos;mangos;characters"
+LogsDatabase.Info      = "127.0.0.1;3306;mangos;mangos;logs"
+
+# ----------------------------------------------------------------------------
+# Data directory and DBC paths
+# ----------------------------------------------------------------------------
+DataDir = "/opt/superui-core/data"
+
+# ----------------------------------------------------------------------------
+# Remote Access (RA) - REQUIRED for MangosSuperUI
+# see INSTALL.md: Ra.MinLevel is read by VMaNGOS source but omitted from the
+# shipped .dist file. Default-installed mangosd blocks ALL accounts without it.
+# ----------------------------------------------------------------------------
+Ra.Enable      = 1
+Ra.IP          = "0.0.0.0"
+Ra.Port        = 3443
+Ra.MinAccountLevel = 3
+Ra.Restricted  = 0
+Ra.MinLevel    = 3
+
+# ----------------------------------------------------------------------------
+# Logging
+# ----------------------------------------------------------------------------
+LogSQL = 1
+LogFile = "Server.log"
+LogTimestamp = "%Y-%m-%d %H:%M:%S"
+LogWorld = 0
+LogPerCharacter = 0
+
+# ----------------------------------------------------------------------------
+# Game server settings
+# ----------------------------------------------------------------------------
+GameType = 1
+RealmZone = 1
+Expansion = 1
+DBC.Locale = 0
+DeclinedNames = 0
+StrictPlayerNames = 0
+StrictCharterNames = 0
+StrictPetNames = 0
+MinPlayerName = 2
+MinCharterName = 2
+MinPetName = 2
+
+# Character / world sizes
+StartPlayerLevel = 1
+StartPlayerMoney = 0
+MaxPlayerLevel = 60
+XP.Boost = 1
+
+# Rates
+Rate.Health = 1
+Rate.Mana = 1
+Rate.Speed = 1
+Rate.Quest = 1
+Rate.Kill = 1
+Rate.Reputation = 1
+Rate.Rest = 1
+Rate.Drop = 1
+Rate.Drop.Item = 1
+Rate.Drop.Money = 1
+Rate.XP.Kill = 1
+Rate.XP.Quest = 1
+Rate.XP.Explore = 1
+
+# Other defaults (omitted for brevity - kept at upstream defaults)

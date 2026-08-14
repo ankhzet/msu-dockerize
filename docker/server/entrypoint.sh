@@ -89,6 +89,8 @@ sed -i "s|^LoginDatabaseInfo.*|LoginDatabaseInfo = \"${MARIADB_HOST:-127.0.0.1};
     "$ETC/realmd.conf" 2>/dev/null || true
 sed -i "s|^Ra.IP.*|Ra.IP = \"${RA_IP:-0.0.0.0}\"|"  "$ETC/mangosd.conf" 2>/dev/null || true
 sed -i "s|^Ra.Port.*|Ra.Port = ${RA_PORT:-3443}|"     "$ETC/mangosd.conf" 2>/dev/null || true
+sed -i "s|^Ra.Enable.*|Ra.Enable = 1|"                "$ETC/mangosd.conf" 2>/dev/null || true
+sed -i "s|^Ra.Restricted.*|Ra.Restricted = 0|"        "$ETC/mangosd.conf" 2>/dev/null || true
 
 # Apply the critical VMaNGOS RA config (see INSTALL.md - Ra.MinLevel is REQUIRED)
 # Re-assert on every start so user overrides don't silently disable RA.

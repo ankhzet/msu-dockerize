@@ -147,11 +147,70 @@ services:
       - core-etc:/opt/superui-core/etc:ro
       - ./backups:/var/mangossuperui/backups
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:${UI_HTTP_PORT:-5000}/"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 30s
+    networks:
+      - superui-net
+
+  # ---------------------------------------------------------------------------
+  # One-shot: VMaps/DBC/Maps extractor. Runs the SuperUI-Core bundled Extractors
+  # against the mounted WoW client and writes output to the core-data volume.
+  # Profile "extract" so it never auto-starts. Use:
+  #   docker compose --profile extract up vmaps-extract
+  # No healthcheck, no auto-restart - it's a one-shot job.
+  # ---------------------------------------------------------------------------
+  vmaps-extract:
+    image: mangossuperui/core:latest
+    container_name: mangos-vmaps-extract
+    profiles: ["extract"]
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "true"]
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      WOW_CLIENT_DATA: ${WOW_CLIENT_DATA:-}
+      MARIADB_HOST: mariadb
+      MARIADB_PORT: "3306"
+    volumes:
+      - core-data:/opt/superui-core/data
+      - core-logs:/opt/superui-core/logs
+      - ${WOW_CLIENT_DATA:-/dev/null}:/data:ro
+    working_dir: /opt/superui-core/data
+    entrypoint: ["/usr/local/bin/extract-client-data.sh"]
+    networks:
+      - superui-net
+
+  # ---------------------------------------------------------------------------
+  # One-shot: apply all SQL migrations to bring the world DB up to the fork's
+  # current schema. Uses --binary-mode + --delimiter for the add_migration()
+  # stored procedures that use `delimiter ??` syntax.
+  # Profile "migrate" so it never auto-starts. Use:
+  #   docker compose --profile migrate up migrations-apply
+  # ---------------------------------------------------------------------------
+  migrations-apply:
+    image: mangossuperui/core:latest
+    container_name: mangos-migrations-apply
+    profiles: ["migrate"]
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "true"]
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      MARIADB_HOST: mariadb
+      MARIADB_PORT: "3306"
+      MARIADB_USER: root
+      MARIADB_PASSWORD: ${MARIADB_ROOT_PASSWORD:-root}
+    volumes:
+      - core-data:/opt/superui-core/data
+    working_dir: /opt/superui-core/data
+    entrypoint: ["/usr/local/bin/apply-migrations.sh"]
     networks:
       - superui-net
 
@@ -234,3 +293,10 @@ volumes:
   ui-patches:
   ollama-data:
   comfyui-data:
+
+  # ---------------------------------------------------------------------------
+  # One-shot: Apply migrations (foreground, no daemon needed since it runs once)
+  # Use: docker compose --profile migrate up migrations-apply
+  # The script is robust enough that the bash tool's 30-min timeout covers it.
+  # ---------------------------------------------------------------------------
+  # (Already added above as migrations-apply profile)

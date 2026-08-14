@@ -35,6 +35,7 @@ RUN apt-get update \
         unzip \
         curl \
         mariadb-client \
+        procps \
     && ln -sf /usr/share/zoneinfo/${TZ:-UTC} /etc/localtime \
     && rm -rf /var/lib/apt/lists/*
 
@@ -119,7 +120,9 @@ RUN if [ ! -f $SUPERCORE_HOME/etc/mangosd.conf.dist ]; then \
 # Entrypoint + DB init helper (used by the host wrapper)
 COPY docker/server/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY scripts/init-database.sh    /usr/local/bin/db-init.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/db-init.sh
+COPY docker/server/extract-client-data.sh /usr/local/bin/extract-client-data.sh
+COPY docker/server/apply-migrations.sh /usr/local/bin/apply-migrations.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/db-init.sh /usr/local/bin/extract-client-data.sh /usr/local/bin/apply-migrations.sh
 
 ENV PATH="$SUPERCORE_HOME/bin:$PATH"
 

@@ -11,11 +11,18 @@ vendor/*.tar.xz
 vendor/*.tar.bz2
 vendor/sql/*.sql
 !vendor/sql/.gitkeep
+vendor/sql/migrations/
+vendor/sql/old_migrations/
 vendor/CHANGELOG*
 vendor/README*.md
 !vendor/README.md
 vendor/superui-core-*
 vendor/MangosSuperUI-*
+
+# Temporary shallow clones and workdirs (git-managed but transient)
+.tmp-core/
+.tmp-msui/
+.tmp-*/
 
 # Backups
 backups/*

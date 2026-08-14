@@ -89,9 +89,10 @@ if compgen -G "$CLIENT_PATH/*.MPQ" >/dev/null || compgen -G "$CLIENT_PATH/Data/*
     has_mpq=1
 fi
 
-# Smell-test: look for known DBC files
+# Smell-test: look for known DBC files. In 1.12.1 the DBCs are inside dbc.MPQ
+# (not loose), but MPQ archives are the real tell-tale.
 dbc_hits=0
-for f in Map.dbc CinematicCamera.dbc DBCache.bin; do
+for f in Map.dbc CinematicCamera.dbc DBCache.bin dbc.MPQ; do
     [[ -f "$CLIENT_PATH/$f" ]] && dbc_hits=$((dbc_hits+1))
     [[ -f "$CLIENT_PATH/Data/$f" ]] && dbc_hits=$((dbc_hits+1))
 done
@@ -123,19 +124,20 @@ if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
 fi
 
 # --- Verify the mangosd container can see the client at /data ---
-if ! docker exec "$CONTAINER" test -d /data 2>/dev/null; then
+# (Use `cd / && ...` to dodge Git Bash turning `/data` into `D:/Software/Git/data`.)
+if ! docker exec "$CONTAINER" sh -c 'cd / && test -d /data' 2>/dev/null; then
     echo "ERROR: container '$CONTAINER' has no /data directory."
     echo "Set WOW_CLIENT_DATA in .env to your client path and restart the stack:"
     echo "  echo 'WOW_CLIENT_DATA=$CLIENT_PATH' >> .env"
     echo "  docker compose up -d"
     exit 1
 fi
-echo "  Container sees /data: $(docker exec "$CONTAINER" ls /data 2>/dev/null | head -3 | tr '\n' ' ')..."
+echo "  Container sees /data: $(docker exec "$CONTAINER" sh -c 'cd / && ls /data' 2>/dev/null | head -3 | tr '\n' ' ')..."
 
 # --- Run the extraction inside the container ---
 echo ""
 echo "Running extraction inside the container (this can take 10-30 min for VMaps)..."
-docker exec -i "$CONTAINER" bash -s -- $((SKIP_MMAPS)) $((DO_CLEAN)) <<'REMOTE'
+docker exec -i "$CONTAINER" sh -c 'cd / && exec bash -s -- '"$((SKIP_MMAPS))"' '"$((DO_CLEAN))"'' <<'REMOTE'
 set -e
 WORKDIR="/tmp/extract-$$"
 CLIENT="/data"
@@ -168,7 +170,7 @@ rm -f "$DEST/maps/000*.map" 2>/dev/null || true   # safety
 
 echo ""
 echo "[1/4] MapExtractor (DBC + Maps, ~1-3 min)"
-./MapExtractor -d "$SRC" > "$WORKDIR/MapExtractor.log" 2>&1
+./MapExtractor -i "$SRC" > "$WORKDIR/MapExtractor.log" 2>&1
 m=$?; if [[ $m -ne 0 ]]; then echo "  FAILED (exit $m); tail of log:"; tail -20 "$WORKDIR/MapExtractor.log"; exit $m; fi
 echo "  ok"
 

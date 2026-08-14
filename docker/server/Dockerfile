@@ -33,6 +33,7 @@ RUN apt-get update \
         tzdata \
         bash \
         unzip \
+        curl \
         mariadb-client \
     && ln -sf /usr/share/zoneinfo/${TZ:-UTC} /etc/localtime \
     && rm -rf /var/lib/apt/lists/*
@@ -115,9 +116,10 @@ RUN if [ ! -f $SUPERCORE_HOME/etc/mangosd.conf.dist ]; then \
         cp $SUPERCORE_HOME/etc/realmd.conf.dist.host $SUPERCORE_HOME/etc/realmd.conf.dist; \
     fi
 
-# Entrypoint
+# Entrypoint + DB init helper (used by the host wrapper)
 COPY docker/server/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY scripts/init-database.sh    /usr/local/bin/db-init.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/db-init.sh
 
 ENV PATH="$SUPERCORE_HOME/bin:$PATH"
 

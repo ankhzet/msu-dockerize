@@ -150,8 +150,9 @@ try {
 
 # ---------- SuperUI-Core SQL files ----------
 # The init-database.sh needs the realmd/characters/logs SQL schema files.
-# These are small (~1MB total) and shipped from the source repository.
-# We only download the SQL subset to keep bandwidth low.
+# Migrations are downloaded on demand by init-database.sh (not pre-cached
+# here because there are ~1000 of them and only needed when loading a
+# non-fork world DB).
 Write-Host ""
 Write-Host "[3/4] SuperUI-Core SQL schema files (small)"
 $sqlTag = if ($SUPERUI_CORE_VERSION -eq 'latest') { 'development' } else { $SUPERUI_CORE_VERSION }
@@ -161,7 +162,7 @@ if (-not (Test-Path -LiteralPath $sqlDir)) {
 }
 try {
     $headers = @{ 'User-Agent' = 'MangosSuperUI-Docker' }
-    # Try the new layout first (sql/base/), then fall back to flat (sql/)
+    # Top-level SQL files (realmd/characters/logs schema definitions)
     $candidates = @(
         "https://api.github.com/repos/Yafrovon/SuperUI-Core/contents/sql/base?ref=$sqlTag",
         "https://api.github.com/repos/Yafrovon/SuperUI-Core/contents/sql?ref=$sqlTag"

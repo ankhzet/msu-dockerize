@@ -19,8 +19,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+# When the script is baked into the image at /usr/local/bin/db-init.sh,
+# ROOT_DIR resolves to /usr/local which is meaningless. In that case, treat
+# /opt/superui-core as the project root.
+if [[ "$ROOT_DIR" == "/usr/local" || "$ROOT_DIR" == "/usr/local/bin" || "$ROOT_DIR" == "/" ]]; then
+    ROOT_DIR="/opt/superui-core"
+fi
 VENDOR="$ROOT_DIR/vendor"
-INIT_DIR="$ROOT_DIR/.init"
+INIT_DIR="${INIT_DIR:-$ROOT_DIR/.init}"
 mkdir -p "$VENDOR" "$INIT_DIR"
 
 # Load .env
@@ -34,34 +40,54 @@ fi
 WORLD_DB_MODE="${WORLD_DB_MODE:-bare}"
 MARIADB_HOST="${MARIADB_HOST:-127.0.0.1}"
 MARIADB_PORT="${MARIADB_PORT:-3306}"
-MARIADB_USER="${MARIADB_USER:-root}"
-MARIADB_PASSWORD="${MARIADB_ROOT_PASSWORD:-${MARIADB_PASSWORD:-root}}"
+# If MARIADB_ROOT_PASSWORD is set, use the root account (recommended for init).
+# Otherwise fall back to the regular app user (limited to what was GRANTed).
+if [ -n "${MARIADB_ROOT_PASSWORD:-}" ]; then
+    MARIADB_USER="root"
+    MARIADB_PASSWORD="$MARIADB_ROOT_PASSWORD"
+else
+    MARIADB_USER="${MARIADB_USER:-mangos}"
+    MARIADB_PASSWORD="${MARIADB_PASSWORD:-mangos}"
+fi
 MARIADB_DATABASE="${MARIADB_DATABASE:-mangos}"
 MANGOS_ADMIN_DB="${MANGOS_ADMIN_DB:-vmangos_admin}"
 
+# GitHub branch/ref for the SuperUI-Core fork. Used to fetch migrations when
+# the world DB is older than the fork's schema.
+SUPERUI_CORE_REF="${SUPERUI_CORE_REF:-development}"
+
 # ---- helpers ----
 mysql_exec() {
-    mariadb -h "$MARIADB_HOST" -P "$MARIADB_PORT" -u "$MARIADB_USER" -p"$MARIADB_PASSWORD" \
+    # Use a large max_allowed_packet so big INSERTs in the world DB dump
+    # don't fail. Falls back to mysql client if mariadb is missing.
+    mariadb --max-allowed-packet=1G \
+        -h "$MARIADB_HOST" -P "$MARIADB_PORT" -u "$MARIADB_USER" -p"$MARIADB_PASSWORD" \
         --skip-ssl --connect-timeout=10 "$@" 2>/dev/null \
-    || mysql -h "$MARIADB_HOST" -P "$MARIADB_PORT" -u "$MARIADB_USER" -p"$MARIADB_PASSWORD" \
+    || mysql --max-allowed-packet=1G \
+        -h "$MARIADB_HOST" -P "$MARIADB_PORT" -u "$MARIADB_USER" -p"$MARIADB_PASSWORD" \
         --skip-ssl --connect-timeout=10 "$@" 2>/dev/null
 }
 
 db_exists() {
-    mysql_exec -e "SELECT 1 FROM $1 LIMIT 1" >/dev/null 2>&1
+    # True if the named database is reachable by the current user.
+    local db="$1"
+    mysql_exec -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$db' LIMIT 1" >/dev/null 2>&1
 }
 
 # Source SQL files (realmd, characters, logs) from the SuperUI-Core's sql/ dir
 # These are bundled with the server image (or the source repo).
 BUNDLED_SQL_DIR="${BUNDLED_SQL_DIR:-/opt/superui-core/sql}"
 HOST_SQL_DIR="$INIT_DIR/sql"
+HOST_VENDOR_DIR="$ROOT_DIR/vendor/sql"
 if [[ -d "$BUNDLED_SQL_DIR" && "$(ls -A "$BUNDLED_SQL_DIR" 2>/dev/null | grep -v 'README\|\.gitkeep')" ]]; then
     SQL_DIR="$BUNDLED_SQL_DIR"
+elif [[ -d "$HOST_VENDOR_DIR" && "$(ls -A "$HOST_VENDOR_DIR" 2>/dev/null | grep -v 'README\|\.gitkeep')" ]]; then
+    SQL_DIR="$HOST_VENDOR_DIR"
 elif [[ -d "$HOST_SQL_DIR" && "$(ls -A "$HOST_SQL_DIR" 2>/dev/null | grep -v 'README\|\.gitkeep')" ]]; then
     SQL_DIR="$HOST_SQL_DIR"
 else
     echo "WARNING: no SuperUI-Core SQL directory found."
-    echo "Expected either $BUNDLED_SQL_DIR or $HOST_SQL_DIR."
+    echo "Expected either $BUNDLED_SQL_DIR, $HOST_VENDOR_DIR, or $HOST_SQL_DIR."
     echo "Run ./scripts/download-artifacts.ps1 to populate ./vendor/sql/."
     echo "Schemas will only be created as empty placeholders."
     SQL_DIR=""
@@ -89,33 +115,115 @@ EOF
 }
 
 apply_bundled_sql() {
-    local label="$1" sql="$2"
+    # Each upstream SQL file targets a specific schema. We must connect to that
+    # schema (not the default mangos DB) so the unprefixed CREATE TABLE
+    # statements land in the right place.
+    local label="$1" target_db="$2" sql="$3"
     if [[ -z "$SQL_DIR" || ! -f "$SQL_DIR/$sql" ]]; then
         echo "  [skip] $label (no $sql in $SQL_DIR)"
         return 1
     fi
-    echo "  [apply] $label ..."
-    mysql_exec "$MARIADB_DATABASE" < "$SQL_DIR/$sql" 2>/dev/null \
-    || mysql_exec "$MARIADB_DATABASE" < "$SQL_DIR/$sql" 2>&1 | tail -n 5
+    echo "  [apply] $label -> $target_db ..."
+    mysql_exec "$target_db" < "$SQL_DIR/$sql" 2>&1 | tail -n 5
+}
+
+# ----------------------------------------------------------------------------
+# Migrations
+# ----------------------------------------------------------------------------
+# Bring realmd / characters / logs / mangos schemas up to the fork's current
+# version. mangosd and realmd refuse to start when they detect missing
+# migrations. We download the .sql migration files on demand from the fork's
+# repository and apply any whose ID isn't already in the corresponding
+# `migrations` table.
+download_migrations() {
+    local mig_dir="$SQL_DIR/migrations"
+    mkdir -p "$mig_dir"
+    if [[ -d "$mig_dir" ]] && [[ "$(ls -A "$mig_dir" 2>/dev/null | grep -c '\.sql$')" -gt 0 ]]; then
+        echo "  Migrations already cached: $(ls "$mig_dir"/*.sql 2>/dev/null | wc -l) files"
+        return
+    fi
+    echo "  Fetching migrations directory from SuperUI-Core@${SUPERUI_CORE_REF}..."
+    local api="https://api.github.com/repos/Yafrovon/SuperUI-Core/contents/sql/migrations?ref=$SUPERUI_CORE_REF&per_page=1000"
+    local listing
+    listing=$(curl -fsSL -H 'User-Agent: MangosSuperUI-Docker' "$api" 2>/dev/null || echo "")
+    if [[ -z "$listing" ]]; then
+        echo "  WARNING: could not fetch migration listing. Migrations not applied."
+        echo "  Run with --skip-migrations later, or pre-populate $mig_dir"
+        return
+    fi
+    echo "$listing" | grep -oE '"download_url"[[:space:]]*:[[:space:]]*"[^"]*\.sql"' \
+        | sed -E 's/.*"([^"]+)".*/\1/' \
+        | while read -r url; do
+            [[ -z "$url" ]] && continue
+            local fname
+            fname=$(basename "$url")
+            curl -fsSL "$url" -o "$mig_dir/$fname" 2>/dev/null || echo "    [warn] $fname failed"
+        done
+    echo "  [ok] $(ls "$mig_dir"/*.sql 2>/dev/null | wc -l) migration files cached"
+}
+
+apply_migrations() {
+    download_migrations
+    local mig_dir="$SQL_DIR/migrations"
+    [[ ! -d "$mig_dir" ]] && return
+
+    # Apply only migrations whose ID isn't already in the target schema's
+    # migrations table. Filename convention from upstream:
+    #   <timestamp>_logon.sql       -> realmd
+    #   <timestamp>_characters.sql  -> characters
+    #   <timestamp>_logs.sql        -> logs
+    #   <timestamp>_world.sql       -> world (mangos)
+    local counts_realmd=0 counts_chars=0 counts_logs=0 counts_world=0
+    for f in "$mig_dir"/*.sql; do
+        [[ -f "$f" ]] || continue
+        local fname target_db id
+        fname=$(basename "$f")
+        id="${fname%.sql}"
+        case "$fname" in
+            *_logon.sql)      target_db="realmd" ;;
+            *_characters.sql) target_db="characters" ;;
+            *_logs.sql)       target_db="logs" ;;
+            *_world.sql)      target_db="$MARIADB_DATABASE" ;;
+            *)                target_db="" ;;
+        esac
+        [[ -z "$target_db" ]] && continue
+
+        # Skip if this migration is already recorded in the target schema
+        local already
+        already=$(mysql_exec -N -e "SELECT 1 FROM ${target_db}.migrations WHERE id='$id' LIMIT 1" 2>/dev/null || echo "")
+        if [[ "$already" == "1" ]]; then
+            continue
+        fi
+        if mysql_exec "$target_db" < "$f" >/dev/null 2>&1; then
+            case "$target_db" in
+                realmd)     counts_realmd=$((counts_realmd+1)) ;;
+                characters) counts_chars=$((counts_chars+1)) ;;
+                logs)       counts_logs=$((counts_logs+1)) ;;
+                *)          counts_world=$((counts_world+1)) ;;
+            esac
+        fi
+    done
+    echo "  [migrations applied] realmd=$counts_realmd characters=$counts_chars logs=$counts_logs mangos=$counts_world"
 }
 
 # ----------------------------------------------------------------------------
 # World DB acquisition
 # ----------------------------------------------------------------------------
 acquire_world_db() {
+    # Logs to stderr; returns the resulting file path on stdout.
     local source="$1"
     local out_file="$VENDOR/world.7z"
     local out_sql="$VENDOR/world.sql"
 
     if [[ -f "$out_sql" ]]; then
-        echo "  [cached] $out_sql"
+        echo "  [cached] $out_sql" >&2
         echo "$out_sql"
         return
     fi
 
     # Local .sql
     if [[ -f "$source" && "$source" == *.sql ]]; then
-        echo "  [copy] $source -> $out_sql"
+        echo "  [copy] $source -> $out_sql" >&2
         cp "$source" "$out_sql"
         echo "$out_sql"
         return
@@ -123,7 +231,7 @@ acquire_world_db() {
 
     # Local .7z
     if [[ -f "$source" && "$source" == *.7z ]]; then
-        echo "  [copy] $source -> $out_file"
+        echo "  [copy] $source -> $out_file" >&2
         cp "$source" "$out_file"
         echo "$out_file"
         return
@@ -131,7 +239,7 @@ acquire_world_db() {
 
     # URL
     if [[ "$source" =~ ^https?:// ]]; then
-        echo "  [download] $source"
+        echo "  [download] $source" >&2
         curl -fL --retry 3 --retry-delay 5 -o "${out_file}.part" "$source"
         mv -f "${out_file}.part" "$out_file"
         echo "$out_file"
@@ -230,16 +338,13 @@ fi
 create_empty_schemas
 echo "  [ok] schemas created"
 
-# 2. Apply the bundled base SQL (realmd, characters, logs, mangos schema)
+# 2. Apply the bundled base SQL (realmd, characters, logs schemas)
 echo
 echo "Applying base SQL from SuperUI-Core..."
-apply_bundled_sql "realmd schema"     "logon.sql"      || true
-apply_bundled_sql "characters schema" "characters.sql" || true
-apply_bundled_sql "logs schema"       "logs.sql"       || true
-# The world DB schema is in the .sql we load below
-if [[ "$MODE" == "bare" ]]; then
-    apply_bundled_sql "mangos schema"  "mangos.sql"     || true
-fi
+apply_bundled_sql "realmd schema"     realmd     "logon.sql"      || true
+apply_bundled_sql "characters schema" characters "characters.sql" || true
+apply_bundled_sql "logs schema"       logs       "logs.sql"       || true
+# (mangos schema is populated by the world DB dump below)
 
 # 3. World DB
 if [[ "$MODE" != "bare" && -n "$WORLD_SOURCE" ]]; then
@@ -250,10 +355,20 @@ if [[ "$MODE" != "bare" && -n "$WORLD_SOURCE" ]]; then
         extract_world_db "$world_artifact"
     fi
     if [[ -f "$VENDOR/world.sql" ]]; then
-        echo "  [load] $VENDOR/world.sql -> $MARIADB_DATABASE"
-        echo "    (this may take a few minutes)"
-        mysql_exec "$MARIADB_DATABASE" < "$VENDOR/world.sql"
-        echo "  [ok] world DB loaded"
+        # Check if the world DB is already loaded (skip reload for idempotency)
+        existing_migs=$(mysql_exec -N -e "SELECT COUNT(*) FROM ${MARIADB_DATABASE}.migrations" 2>/dev/null || echo 0)
+        if [[ "$existing_migs" -gt 0 ]]; then
+            echo "  [skip] world DB already loaded ($existing_migs migrations present)"
+        else
+            echo "  [load] $VENDOR/world.sql -> $MARIADB_DATABASE"
+            echo "    (this may take a few minutes)"
+            mysql_exec --force "$MARIADB_DATABASE" < "$VENDOR/world.sql"
+            echo "  [ok] world DB loaded"
+        fi
+
+        # 3b. Bring the schemas up to the fork's current version. Without this,
+        # mangosd / realmd will refuse to start (missing migrations error).
+        apply_migrations
     fi
 elif [[ "$MODE" == "bare" ]]; then
     echo

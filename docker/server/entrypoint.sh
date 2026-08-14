@@ -38,7 +38,7 @@ done
 # to start without it (see INSTALL.md). In "bare" mode the user runs
 # `init-database.sh --standard` or `--full` to populate this.
 if command -v mariadb >/dev/null 2>&1; then
-    HAS_MIGRATIONS=$(mariadb -h "${MARIADB_HOST:-mariadb}" -P "${MARIADB_PORT:-3306}" \
+    HAS_MIGRATIONS=$(mariadb --skip-ssl -h "${MARIADB_HOST:-mariadb}" -P "${MARIADB_PORT:-3306}" \
         -u "${MARIADB_USER:-mangos}" -p"${MARIADB_PASSWORD:-mangos}" \
         -e "SHOW TABLES FROM ${MARIADB_DATABASE:-mangos} LIKE 'migrations';" \
         -sN 2>/dev/null || echo "")
@@ -75,6 +75,7 @@ if [ ! -f "$ETC/realmd.conf" ] && [ -f "$ETC/realmd.conf.dist" ]; then
 fi
 
 # Apply environment-variable overrides to the configs.
+# realmd uses `LoginDatabaseInfo` (no dot); mangosd uses `LoginDatabase.Info`.
 echo "Templating configs from environment..."
 sed -i "s|^LoginDatabase.Info.*|LoginDatabase.Info = \"${MARIADB_HOST:-127.0.0.1};${MARIADB_PORT:-3306};${MARIADB_USER:-mangos};${MARIADB_PASSWORD:-mangos};realmd\"|" \
     "$ETC/mangosd.conf" 2>/dev/null || true
@@ -84,7 +85,7 @@ sed -i "s|^CharacterDatabase.Info.*|CharacterDatabase.Info = \"${MARIADB_HOST:-1
     "$ETC/mangosd.conf" 2>/dev/null || true
 sed -i "s|^LogsDatabase.Info.*|LogsDatabase.Info = \"${MARIADB_HOST:-127.0.0.1};${MARIADB_PORT:-3306};${MARIADB_USER:-mangos};${MARIADB_PASSWORD:-mangos};logs\"|" \
     "$ETC/mangosd.conf" 2>/dev/null || true
-sed -i "s|^LoginDatabase.Info.*|LoginDatabase.Info = \"${MARIADB_HOST:-127.0.0.1};${MARIADB_PORT:-3306};${MARIADB_USER:-mangos};${MARIADB_PASSWORD:-mangos};realmd\"|" \
+sed -i "s|^LoginDatabaseInfo.*|LoginDatabaseInfo = \"${MARIADB_HOST:-127.0.0.1};${MARIADB_PORT:-3306};${MARIADB_USER:-mangos};${MARIADB_PASSWORD:-mangos};realmd\"|" \
     "$ETC/realmd.conf" 2>/dev/null || true
 sed -i "s|^Ra.IP.*|Ra.IP = \"${RA_IP:-0.0.0.0}\"|"  "$ETC/mangosd.conf" 2>/dev/null || true
 sed -i "s|^Ra.Port.*|Ra.Port = ${RA_PORT:-3443}|"     "$ETC/mangosd.conf" 2>/dev/null || true

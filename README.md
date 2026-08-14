@@ -93,6 +93,18 @@ Navigate to **http://localhost:5000**.
 
 The dashboard should turn mostly green. Click **Diagnose** if anything is red.
 
+### 5. (Optional) Provide a WoW client
+
+Set `WOW_CLIENT_DATA` in `.env` to your WoW 1.12.1 client path (root or just the `Data/` subdir), then:
+
+```bash
+docker compose up -d                           # restart with the new mount
+./scripts/extract-client-data.sh              # extract DBC/Maps/VMaps
+./scripts/extract-client-data.sh --no-mmaps   # skip MMaps (saves hours)
+```
+
+The extractors are bundled in the SuperUI-Core prebuilt. Without this, mangosd boots but reports "map files not found" — the server runs the DB and UI but no clients can connect.
+
 ## Asset strategy
 
 This stack is **bare by default** — you decide what to download and when.

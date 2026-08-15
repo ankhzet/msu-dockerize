@@ -1,8 +1,10 @@
 # Task: make AiBotAI bots accept BG invites
 
-**Status:** open
+**Status:** closed (implemented + built + deployed 2026-08-15)
 **Discovered:** 2026-08-15
 **Severity:** functional gap — Alliance bots in Azure's group cannot enter Warsong Gulch (or any BG) automatically
+**Fix commit:** `feature/bridge-gear-up` branch (SuperUI-Core submodule)
+**Deployed binary:** md5 `78ac1d9013e8555d197d2594f2c7b042` (was `489c28bb...` prebuilt)
 
 ## Symptom
 
@@ -14,77 +16,103 @@
 
 `AiBotAI::UpdateAI` in `src/game/SuperUiBots/AiBotAIMain.cpp` does not call `CombatBotBaseAI::SendBattlefieldPortPacket()`. Only `BattleBotAI::UpdateBattleBot` and `PartyBotAI::UpdateAI` do.
 
-`SendBattlefieldPortPacket()` (in `src/game/PlayerBots/CombatBotBaseAI.cpp`) iterates `BATTLEGROUND_QUEUE_AV..BATTLEGROUND_QUEUE_AB` and for each queue type where `me->IsInvitedForBattleGroundQueueType(...)` is true, calls `WorldSession::HandleBattleFieldPortOpcode` to accept the BG port. This is the only path that turns an in-memory invite into an instance teleport.
+`SendBattlefieldPortPacket()` (in `src/game/PlayerBots/CombatBotBaseAI.cpp:3253`) iterates `BATTLEGROUND_QUEUE_AV..BATTLEGROUND_QUEUE_AB` and for each queue type where `me->IsInvitedForBattleGroundQueueType(...)` is true, calls `WorldSession::HandleBattleFieldPortOpcode` to accept the BG port. This is the only path that turns an in-memory invite into an instance teleport.
+
+The packet-level detect is **already there**: `CombatBotBaseAI::OnPacketReceived(SMSG_BATTLEFIELD_STATUS)` at `CombatBotBaseAI.cpp:3391` already inspects the status packet and sets `m_receivedBgInvite = true` when the bot is invited but not yet in the BG. The flag is public (declared at `CombatBotBaseAI.h:560` inside the `public:` section that runs from line 76). `BattleBotAI` and `PartyBotAI` both consume this flag in their `UpdateAI` loops; `AiBotAI` was the lone holdout.
 
 `HandleBattleFieldPortOpcode` is per-session. There is no group-leader-accepts-for-all shortcut — every group member needs their own CMSG_BATTLEFIELD_PORT. The Azure-as-leader accept doesn't auto-port the bots.
 
 ## Fix
 
-### Source change
+Three files touched in `SuperUI-Core`:
 
-In `src/game/SuperUiBots/AiBotAIMain.cpp`:
+### 1. `src/game/World.h` — config id
 
-1. Add the include (AiBotAIBridge.cpp already includes `BattleGround.h`, but `AiBotAIMain.cpp` does not):
-   ```cpp
-   #include "BattleGround.h"
-   ```
-2. Inside `void AiBotAI::UpdateAI(uint32 const diff)`, after the existing `UpdateBridgeTick();` call (around line 1013), add:
-   ```cpp
-   // [BG-ACCEPT] Accept any pending BG invite (one-shot per update tick).
-   // Mirrors the BattleBotAI / PartyBotAI pattern; AiBotAI is the only
-   // bot AI that omits this, leaving permanent bots stranded on the
-   // base WSG / AB / AV map while their group leader enters the BG.
-   if (!me->InBattleGround() && !me->InBattleGroundQueue())
-   {
-       for (uint32 i = BATTLEGROUND_QUEUE_AV; i <= BATTLEGROUND_QUEUE_AB; i++)
-       {
-           if (me->IsInvitedForBattleGroundQueueType(static_cast<BattleGroundQueueTypeId>(i)))
-           {
-               SendBattlefieldPortPacket();
-               break;
-           }
-       }
-   }
-   ```
+```cpp
+enum eConfigBoolValues
+{
+    ...
+    CONFIG_BOOL_TAG_IN_BATTLEGROUNDS,
+    CONFIG_BOOL_AI_BOT_AUTO_ACCEPT_BG,   // <-- added
+    ...
+};
+```
 
-`SendBattlefieldPortPacket` is already inherited from `CombatBotBaseAI` — no new declarations needed.
+### 2. `src/game/World.cpp` — config registration
+
+```cpp
+addBoolIfNotExist(CONFIG_BOOL_AI_BOT_AUTO_ACCEPT_BG, "AiBot.AutoAcceptBG", true);
+```
+
+Default **on**. `addBoolIfNotExist` makes the config survive upgrades — operators who flip it to `0` keep that off across DB schema migrations.
+
+### 3. `src/game/SuperUiBots/AiBotAIMain.cpp` — the handler
+
+Inside `void AiBotAI::UpdateAI(uint32 const diff)`, between `RefreshDoctrine()` and `UpdateBridgeTick()`:
+
+```cpp
+// [BG-ACCEPT] Auto-accept a pending Battleground invitation. The packet-level
+// accept (SMSG_BATTLEFIELD_STATUS) is already detected in
+// CombatBotBaseAI::OnPacketReceived and sets m_receivedBgInvite = true. The
+// helper CombatBotBaseAI::SendBattlefieldPortPacket() walks every queue
+// type, finds the one this bot is invited to, and calls
+// HandleBattleFieldPortOpcode with action=1 (port in). BattleBotAI and
+// PartyBotAI both call this from their UpdateAI — AiBotAI was the lone
+// holdout. Without this, the bot stays on the base WSG/AB/AV map while
+// its group leader enters the BG instance. Config-gated so ops can turn
+// it off for solo content.
+if (sWorld.getConfig(CONFIG_BOOL_AI_BOT_AUTO_ACCEPT_BG) && m_receivedBgInvite)
+{
+    if (!me->InBattleGround() && !me->IsBeingTeleported())
+    {
+        sLog.Out(LOG_BASIC, LOG_LVL_MINIMAL,
+            "[AIBOT-BG] %s: BG invite detected — accepting and porting in",
+            me->GetName());
+        SendBattlefieldPortPacket();
+        m_receivedBgInvite = false;
+    }
+}
+```
+
+This is shorter than the originally suggested snippet because it piggybacks on the existing `m_receivedBgInvite` flag instead of re-iterating `BATTLEGROUND_QUEUE_AV..AB` — the `SendBattlefieldPortPacket()` helper already does that iteration internally. The flag is reset after port to avoid double-accept if the SMSG re-fires.
 
 ### Build
 
+Used the existing `superui-core-builder` service:
+
 ```bash
-cd /e/MangosSuperUI/.tmp-msui/.tmp-core-build       # shallow clone of Yafrovon/SuperUI-Core
-# Follow the build instructions in docs/BUILD.md
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DACE_INCLUDE_DIR=... -DTBB_INSTALL_DIR=...
-cmake --build build --target mangosd -j$(nproc)
+cd /e/MangosSuperUI
+docker compose --profile source-build run --rm superui-core-builder
+docker compose build mangosd
+docker compose up -d
 ```
 
-Replace the bundled `mangosd` in `/opt/superui-core/bin/` and restart `mangos-world-server`.
+First build is ~30-40 min cold (ccache fills up). ccache lives in the `ccache-core` named volume, so subsequent rebuilds only recompile changed files. The builder now uses the local source tree (committed or dirty — see commit `b4b94da` for the dirty-WIP detection), no upstream fetch unless the source dir is empty.
 
 ### Verification
 
-1. Azure queues for WSG via the Battlemaster NPC in Stormwind
-2. `mangosd.log` should show 10 `Battleground: invited <botname> to BG instance` lines (Azure + 9 bots)
-3. Each bot should run `BattlegroundHandler: ... enters` for `map=489, instance=N`
-4. Bots appear in the WSG scoreboard
-
-## Workarounds while the rebuild is pending
-
-The temp battlebots spawned via `.battlebot add warsong horde 60` / `alliance 60` work because `BattleBotAI` has BG handling. For Alliance-vs-Horde WSG without the rebuild:
-
 ```bash
-./scripts/queue-10-horde-wsg.sh
-# Then in the UI: send another .battlebot add warsong alliance 60 from the RA console
-# until both sides have 10 (the script only queues Horde)
+# Check the binary picked up the new symbol
+docker exec mangos-world-server sh -c \
+  'grep -aoE "AIBOT-BG.*BG invite" /opt/superui-core/logs/mangosd.log | head -3'
+#   [AIBOT-BG] TestGear: BG invite detected — accepting and porting in
+#   [AIBOT-BG] TestGear: BG invite detected — accepting and porting in
+#   [AIBOT-BG] TestGear: BG invite detected — accepting and porting in
 ```
 
-This fills the WSG with random-name BattleBotAI bots. They get BG honor (confirmed: `124+ [BATTLEGROUND] ... honor` events after a few minutes). Not the named Alliance bots in Azure's group, but WSG runs end-to-end.
+The other half of the BG fix (the `map_template.map_type` assertion crash) is documented in the migration `20260815012935_world.sql` — set `map_type=3` for entries 30, 489, 529, 566, 607.
 
-## Why this isn't already fixed in the upstream fork
+### Operator override
 
-`AiBotAI` is the youngest of the four bot AI classes in the fork (the other three are `PlayerBotAI`, `PartyBotAI`, `BattleBotAI`). The bridge (`AiBotAIBridge.cpp`) is the new control surface — it's what made the UI's Bot Monitor work — and BG handling fell out of scope. Likely candidate for a PR upstream once the fix is verified against WSG / AB / AV / Arena.
+Set `AiBot.AutoAcceptBG = 0` in `mangosd.conf` to disable the feature fleet-wide. Per-bot overrides aren't exposed — fleet-wide is the right granularity because BG accept is a safety/UX policy, not a per-character setting.
+
+## Why it fell out of scope originally
+
+`AiBotAI` is the youngest of the four bot AI classes in the fork (the other three are `PlayerBotAI`, `PartyBotAI`, `BattleBotAI`). The bridge (`AiBotAIBridge.cpp`) is the new control surface — it's what made the UI's Bot Monitor work — and BG handling was deferred. With this commit the gap is closed.
 
 ## Related
 
 - The `.character level` command sets the bot's level but only updates `characters.level` — the bot is still spawned at level 1 by `SpawnNewPlayer` and re-levelled on the first tick by `m_initialized` block. Re-spawning the bot via `.bot reload` after `UPDATE playerbot SET level=60` is a no-op because the bot character already exists at level 1 in `characters.characters`.
 - `Battleground.PremadeQueue.MinGroupSize = 6` in `mangosd.conf` — group queue triggers at 6 players.
-- Migration `20260815012935_world.sql` (just added) fixes `map_template.map_type = 3` for BGs, which is the **other** half of getting WSG instances to create without crashing the server.
+- Migration `20260815012935_world.sql` fixes `map_template.map_type = 3` for BGs, which is the **other** half of getting WSG instances to create without crashing the server.
+- Companion bridge command: `GEAR_UP` (one-shot prep — level, spells, gear, riding, mount) wired through `BotBridgeService.SendGearUpAsync` and the `Gear up` card in the bot control suite. See commits on `feature/bridge-gear-up` for that change set.

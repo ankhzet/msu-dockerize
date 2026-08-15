@@ -173,3 +173,38 @@ In `.env`, increase MariaDB buffer pool:
 
 For the world server, drop the `cap_add: SYS_NICE` line if the host
 doesn't support it (it gives mangosd a higher process priority).
+
+## MCP server (LLM agent surface)
+
+The MSUI web app exposes a stateless Streamable HTTP MCP server on the
+existing UI port at `http://localhost:5000/mcp`. Any MCP-compatible
+client (Claude Desktop, VS Code Copilot, Cursor, Zed, Claude Code CLI)
+can connect — see `docs/examples/` for copy-paste mcp.json configs.
+
+```powershell
+# Smoke-test the live endpoint with your bearer token
+$env:MCP_TOKEN = (Get-Content .env | Select-String '^MCP_AUTH_TOKEN=' | ForEach-Object { $_.ToString().Split('=', 2)[1] })
+.\scripts\test-mcp.ps1
+
+# Assert the per-class tool catalogue matches what shipped (215 tools)
+.\scripts\audit-mcp.ps1
+
+# Call a tool directly from a Python client
+$env:MSUI_TOKEN = $env:MCP_TOKEN
+python scripts/mcp-client.py home_status
+python scripts/mcp-client.py ra_list_online
+```
+
+### Token capabilities
+
+`MCP_TOKENS_JSON` (preferred) accepts a JSON array of `{token, label, capabilities[]}`
+to mint scoped tokens. See [`MCP.md`](MCP.md#capability-matrix) for the
+10-tag grid (`read`, `ra`, `process`, `write_db`, `worlds`, `bots`, `patches`,
+`baseline`, `lootifier`, `retexture`).
+
+### Common operations
+
+- "What just happened on the server?" → call `home_status` + `home_db_health` + `home_diagnose`.
+- "Is bot X questing properly?" → call `bot_state <guid>` + `bot_live_state <guid>`.
+- "What spells did player Y edit?" → `audit_target_history` with `targetType="player"`, `targetName="Y"`.
+- "Revert last 24h of item edits" → `changegraph_overview` (filter `Days=1`, `Show="revertable"`) → `changegraph_revert_batch`.

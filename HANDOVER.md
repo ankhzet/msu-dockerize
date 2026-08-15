@@ -50,6 +50,12 @@ E:\MangosSuperUI\
 │   ├── extract-client-data.sh   # Host wrapper for extractor
 │   ├── mangos.ps1               # Windows day-to-day commands
 │   └── queue-10-horde-wsg.sh    # [faction] — queues temp BattleBotAI bots for WSG/AB; default Horde, pass alliance
+├── TODO.MCP.md                   # Full MCP surface plan (6 phases) — see commit history
+├── docs/MCP.md                   # MCP catalog, capability matrix, client configs
+├── docs/examples/                # mcp.json for Claude Desktop / VS Code / Cursor / Zed / Claude Code CLI
+├── scripts/
+│   ├── test-mcp.{sh,ps1}         # Smoke-test the live /mcp endpoint with bearer token
+│   └── audit-mcp.{sh,ps1}       # Assert per-class tool counts match the documented surface (215 tools)
 ├── vendor/                      # Pre-downloaded artifacts
 │   ├── MSUI---LINUX---v1.2.2.zip # MangosSuperUI UI prebuilt (25 MB) — superseded by source-built artifacts below
 │   ├── dev-2300e1e.zip          # SuperUI-Core prebuilt (10 MB) — superseded by source-built artifacts below
@@ -57,12 +63,23 @@ E:\MangosSuperUI\
 │   ├── sql/                     # realmd/characters/logs base SQL + migrations/
 │   │   ├── migrations/          # 1047 fork migrations (+ 20260815012935_world.sql for map_type=3)
 │   │   ├── old_migrations/      # 1436 pre-fork migrations (NOT copied — see below)
-│   ├── MangosSuperUI/           # SUBMODULE — Yafrovon/MangosSuperUI@feature/bridge-gear-up
+│   ├── MangosSuperUI/           # SUBMODULE — Yafrovon/MangosSuperUI@feature/bridge-gear-up (forked to ankhzet/MangosSuperUI for MCP commits)
+│   │   └── Mcp/                 # 29 MCP tool classes + 3 resources + 4 prompts (Phase 1–6)
 │   ├── SuperUI-Core/            # SUBMODULE — Yafrovon/SuperUI-Core@feature/bridge-gear-up
 │   ├── builds/core/             # Source-built mangosd history (gitignored except committed tarballs)
 │   ├── builds/ui/               # Source-built UI history
 │   └── current/{core,ui}        # Hardlinks to the newest active build (Dockerfile picks these up)
 ```
+
+**MCP server** — the MSUI web app embeds a stateless Streamable HTTP MCP server
+on the existing UI port (`/mcp`). Exposes 215 tools (RA console, DB queries,
+items / gameobjects / spells / worlds / quests / loot, server logs, DBC, wiki,
+C++ source index, worlds lifecycle, baseline resets, divergence + change
+graph, bot fleet + brain + rotations, config editor), 3 resources
+(`mcp://msui/health`, `mcp://msui/players/{guid}`, `mcp://msui/bots/fleet`),
+and 4 prompts (`/investigate-player`, `/restart-server`, `/triage-griefing`,
+`/review-changes`). Capability-scoped bearer tokens (`MCP_TOKENS_JSON`).
+See [`docs/MCP.md`](docs/MCP.md) and [`TODO.MCP.md`](TODO.MCP.md).
 
 ---
 
@@ -149,6 +166,17 @@ Prebuilt `dev-2300e1e` lacked `SuperUiBots/`. **Source-built mangosd** at commit
 
 ## Next milestone
 
+**MCP server** (status: Phase 1–6 SHIPPED in commit `50ed641` / submodule
+`0e35de2`). Next moves if you want to keep extending it:
+
+- Phase 7: Lootifier / crafting-lootifier / quest-lootifier / profession-tuning
+  generation tools (preview / commit / rollback) — `lootifier` capability.
+- Phase 7: Retexture pipeline — `retexture` capability.
+- Phase 7: xUnit test project under `tests/Mcp/` (WebApplicationFactory-based).
+- Phase 7: World editor placements / save / commit / sculpt.
+
+All tracked in [`TODO.MCP.md`](TODO.MCP.md).
+
 **Get real player bots to fully participate in BGs end-to-end.** Current state:
 - Bots auto-accept BG invites ✓ (verified: 9 of Azure's bots logged `[AIBOT-BG] X: BG invite detected — accepting and porting in`)
 - Bots auto-resume AI on BG end ✓ (verified via binary symbols + BattleBotAI same pattern)
@@ -233,6 +261,19 @@ printf '.battlebot add warsong horde 60\n' > /tmp/mangosd.console
 
 # Restart mangosd instead of .bot stop (.bot stop SIGSEGVs in this build)
 docker compose restart mangosd
+
+# MCP server — smoke test the live endpoint with a bearer token
+MCP_TOKEN=$(grep MCP_AUTH_TOKEN .env | cut -d= -f2)
+./scripts/test-mcp.sh                         # bash
+$env:MCP_TOKEN = $MCP_TOKEN; .\scripts\test-mcp.ps1   # PowerShell
+
+# MCP server — assert the per-class catalogue matches what shipped (215 tools)
+MCP_TOKEN=$MCP_TOKEN ./scripts/audit-mcp.sh
+
+# MCP server — query a single tool directly (see docs/examples/ for client configs)
+$env:MCP_TOKEN = $MCP_TOKEN
+python3 scripts/mcp-client.py home_status
+python3 scripts/mcp-client.py ra_list_online
 ```
 
 ## State snapshot

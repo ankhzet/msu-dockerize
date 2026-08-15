@@ -97,3 +97,23 @@ Delete the dangling cache: `docker builder prune -af`. Re-run the build.
 PowerShell wrapper uses WSL or your Git Bash installation. If neither is
 present, install [Git for Windows](https://git-scm.com/download/win) which
 includes Bash.
+
+## Source-built UI includes the MCP server
+
+When you build MangosSuperUI from source via
+`docker compose --profile source-build run --rm mangossuperui-ui-builder`,
+the result includes the embedded MCP server in
+`vendor/MangosSuperUI/MangosSuperUI/Mcp/`. The published prebuilt
+`MangosSuperUI-linux-x64.zip` does **not** include MCP (the upstream
+release predates it).
+
+To get MCP in a running UI:
+
+1. Fork `vendor/MangosSuperUI/` to your own GitHub (the submodule
+   `.gitmodules` URL points at `Yafrovon/MangosSuperUI` upstream — you
+   need write access to push MCP commits).
+2. Build the UI from source (the builder reads from your submodule).
+3. Set `MCP_AUTH_TOKEN` (or `MCP_TOKENS_JSON`) in `.env`.
+
+For builds using the prebuilt zip (no MCP), set
+`MCP_ENABLED=false` in `.env` to suppress the endpoint.

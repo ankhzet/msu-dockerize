@@ -78,18 +78,19 @@ services:
       RA_PORT: ${MANGOSD_RA_PORT:-3443}
       RA_MIN_LEVEL: ${RA_MIN_LEVEL:-3}
       SUPERUI_CORE_VERSION: ${SUPERUI_CORE_VERSION:-latest}
-    # RA port is exposed only to the host's localhost - never publicly
-    # 5000:5000 is added so the superui service (which shares this container's
-    # network namespace via `network_mode: service:mangosd`) is reachable from
-    # the host's localhost. Docker Compose forbids `ports:` on the side that
-    # joins the namespace, so we publish on the owning service.
-    # 8085 (world) + 3724 (game) are published so a real WoW 1.12.1 client on
-    # the host can reach the realm; realm.address should stay "127.0.0.1".
+    # RA port (3443) is exposed only to the host's localhost - never publicly,
+    # it grants an admin console into mangosd.
+    # 5000 (UI), 8085 (world), 3724 (game/auth) are bound to 0.0.0.0 so the
+    # stack is reachable from the local LAN / NAT (e.g. a real WoW 1.12.1
+    # client on another machine, or the web UI from a phone). If you re-bind
+    # them to 127.0.0.1, only the host's loopback will reach them.
+    # Docker Compose forbids `ports:` on a service that joins another via
+    # `network_mode: service:X`, so we publish on the owning service.
     ports:
       - "127.0.0.1:${MANGOSD_RA_PORT:-3443}:3443"
-      - "127.0.0.1:${UI_HTTP_PORT:-5000}:${UI_HTTP_PORT:-5000}"
-      - "127.0.0.1:${MANGOSD_WORLD_PORT:-8085}:${MANGOSD_WORLD_PORT:-8085}"
-      - "127.0.0.1:${MANGOSD_GAME_PORT:-3724}:${MANGOSD_GAME_PORT:-3724}"
+      - "${UI_HTTP_PORT:-5000}:${UI_HTTP_PORT:-5000}"
+      - "${MANGOSD_WORLD_PORT:-8085}:${MANGOSD_WORLD_PORT:-8085}"
+      - "${MANGOSD_GAME_PORT:-3724}:${MANGOSD_GAME_PORT:-3724}"
     volumes:
       - core-data:/opt/superui-core/data
       - core-logs:/opt/superui-core/logs
@@ -106,6 +107,20 @@ services:
       - SYS_NICE  # higher process priority for smoother combat. Drop if it fails.
     security_opt:
       - no-new-privileges:true
+    # Wait for both realmd (auth, port 3724) and mangosd (world, port 8085) to
+    # be accepting TCP connections before marking healthy. superui's `depends_on`
+    # uses `service_healthy` so Compose won't start it (and try to join this
+    # container's netns) until both sockets are up — fixes the "cannot join
+    # network of a non running container" race that killed superui on first boot.
+    # start_period covers the world DB load (~30-90 s) + RA bind.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - bash -c 'pgrep -x mangosd-main >/dev/null && pgrep -x realmd-main >/dev/null && exec 3<>/dev/tcp/127.0.0.1/3724 && exec 4<>/dev/tcp/127.0.0.1/8085'
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
     networks:
       - superui-net
 
@@ -136,7 +151,7 @@ services:
       mariadb:
         condition: service_healthy
       mangosd:
-        condition: service_started
+        condition: service_healthy
     environment:
       ASPNETCORE_URLS: http://+:${UI_HTTP_PORT:-5000}
       ASPNETCORE_ENVIRONMENT: Production
@@ -157,6 +172,11 @@ services:
       CLIENT_DATA_PATH: /data/Data
       OLLAMA_HOST: ${OLLAMA_HOST:-}
       COMFYUI_HOST: ${COMFYUI_HOST:-}
+      MCP_ENABLED: ${MCP_ENABLED:-true}
+      MCP_REQUIRE_TOKEN: ${MCP_REQUIRE_TOKEN:-true}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      MCP_TOKENS_JSON: ${MCP_TOKENS_JSON:-[]}
+      MCP_ROUTE: ${MCP_ROUTE:-/mcp}
       MANGOS_SUPER_UI_VERSION: ${MANGOS_SUPER_UI_VERSION:-v1.2}
     # NOTE: no `ports:` here — Docker Compose forbids `ports:` on a service
     # that joins another via `network_mode: service:X`. The host-side publish

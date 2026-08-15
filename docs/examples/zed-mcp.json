@@ -1,0 +1,15 @@
+{
+  "_comment": "Zed MCP config. Add to ~/.config/zed/settings.json under 'context_servers' or a project's .zed/settings.json. Replace YOUR_TOKEN_HERE.",
+  "context_servers": {
+    "msui": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/client-http",
+        "http://localhost:5000/mcp",
+        "--header",
+        "Authorization: Bearer YOUR_TOKEN_HERE"
+      ]
+    }
+  }
+}

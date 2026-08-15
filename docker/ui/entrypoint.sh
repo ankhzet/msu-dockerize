@@ -73,6 +73,21 @@ cat > "$CONFIG" <<EOF
     "CommandTimeoutMs":  ${UI_HTTP_PORT:-5000}
   },
 
+  "Mcp": {
+    "Enabled": ${MCP_ENABLED:-true},
+    "Route": "${MCP_ROUTE:-/mcp}",
+    "Auth": {
+      "RequireBearerToken": ${MCP_REQUIRE_TOKEN:-true},
+      "EnvVarName": "MCP_AUTH_TOKEN",
+      "AllowOrigins": [],
+      "//Tokens": "Per-token capability allowlist rendered from MCP_TOKENS_JSON. Empty = superuser for all tokens. Legacy MCP_AUTH_TOKEN env var still works as a superuser fallback.",
+      "Tokens": ${MCP_TOKENS_JSON:-[]}
+    },
+    "Audit": {
+      "OperatorName": "mcp-client"
+    }
+  },
+
   "SpellCreator": {
     "Ollama": { "BaseUrl": "${OLLAMA_HOST:-}" },
     "ComfyUI": { "Nodes": [] }

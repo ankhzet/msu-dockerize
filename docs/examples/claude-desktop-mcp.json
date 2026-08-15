@@ -1,0 +1,12 @@
+{
+  "_comment": "Claude Desktop config. macOS: ~/Library/Application Support/Claude/claude_desktop_config.json | Windows: %APPDATA%\\Claude\\claude_desktop_config.json",
+  "mcpServers": {
+    "msui": {
+      "type": "http",
+      "url": "http://localhost:5000/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN_HERE"
+      }
+    }
+  }
+}

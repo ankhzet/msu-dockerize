@@ -46,6 +46,21 @@
     "CommandTimeoutMs":  5000
   },
 
+  "Mcp": {
+    "Enabled": true,
+    "Route": "/mcp",
+    "Auth": {
+      "RequireBearerToken": true,
+      "EnvVarName": "MCP_AUTH_TOKEN",
+      "AllowOrigins": [],
+      "//Tokens": "Each entry: { token, label, capabilities[] }. Token grants all caps if list empty. Legacy MCP_AUTH_TOKEN env var still works as a superuser fallback.",
+      "Tokens": []
+    },
+    "Audit": {
+      "OperatorName": "mcp-client"
+    }
+  },
+
   "SpellCreator": {
     "Ollama": { "BaseUrl": "http://host.docker.internal:11434" },
     "ComfyUI": { "Nodes": [] }

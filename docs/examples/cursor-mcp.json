@@ -1,0 +1,12 @@
+{
+  "_comment": "Cursor MCP config. Add to ~/.cursor/mcp.json or workspace .cursor/mcp.json. Replace YOUR_TOKEN_HERE with the value of MCP_AUTH_TOKEN from your .env file.",
+  "mcpServers": {
+    "msui": {
+      "url": "http://localhost:5000/mcp",
+      "transport": "http",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN_HERE"
+      }
+    }
+  }
+}

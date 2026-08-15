@@ -1,0 +1,12 @@
+{
+  "_comment": "Drop this in .vscode/mcp.json in any project workspace. Replace YOUR_TOKEN with the value of MCP_AUTH_TOKEN from your .env file.",
+  "servers": {
+    "msui": {
+      "type": "http",
+      "url": "http://localhost:5000/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN_HERE"
+      }
+    }
+  }
+}

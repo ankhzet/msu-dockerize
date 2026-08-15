@@ -1,0 +1,12 @@
+{
+  "_comment": "Claude Code CLI MCP config. Drop into ~/.claude/mcp_servers.json or in a project: .claude/mcp_servers.json. Replace YOUR_TOKEN_HERE.",
+  "mcpServers": {
+    "msui": {
+      "type": "http",
+      "url": "http://localhost:5000/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN_HERE"
+      }
+    }
+  }
+}

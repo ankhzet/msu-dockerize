@@ -207,6 +207,73 @@ containerized services. On Windows and macOS, `host.docker.internal` works out
 of the box. On Linux, `extra_hosts: host.docker.internal:host-gateway` is
 already configured in the compose file.
 
+## Optional: MCP (Model Context Protocol) server
+
+MSUI exposes its RemoteAdmin console, database queries, world/spell/item DB
+inspection + edits, server logs, wiki + source-code search, process
+controls, config editor, world lifecycle, OG baseline (diff + reset),
+divergence + change-graph, bot fleet + brain + rotations, and patch
+metadata as **215 MCP tools** plus **3 resources** and **4 prompts**
+(stateless Streamable HTTP transport on the existing UI port at `/mcp`).
+Set `MCP_AUTH_TOKEN` in `.env` (generate with `openssl rand -hex 32`) and
+connect any MCP-compatible client — Claude Desktop, VS Code Copilot, or a
+custom agent. Token capabilities can be scoped per-client via
+`MCP_TOKENS_JSON` (read-only CI bot, operator token, etc.). See
+[docs/MCP.md](docs/MCP.md) for the full tool list and configuration
+recipes, and [docs/MCP.md#capability-matrix](docs/MCP.md) for the
+capability matrix.
+
+### Smoke test
+
+After `docker compose up -d`, verify the endpoint is reachable and your
+token works:
+
+```bash
+MCP_TOKEN=tk_xxx ./scripts/test-mcp.sh
+# or on Windows:
+$env:MCP_TOKEN = "tk_xxx"; .\scripts\test-mcp.ps1
+```
+
+The script calls `tools/list`, `home_status`, `ra_list_online`, and
+verifies that an `ra_send_command` without the `ra` capability returns
+`403 insufficient_scope`.
+
+### Catalogue audit
+
+`scripts/audit-mcp.sh` (and `.ps1`) enumerates every tool and asserts the
+expected per-class count — so you catch regressions where a refactor
+silently drops a tool. Exit code 1 = at least one class is wrong.
+
+```bash
+MCP_TOKEN=tk_xxx ./scripts/audit-mcp.sh
+```
+
+The expected counts are pinned to the current surface (215 tools across
+30 classes); update the `EXPECTED` dict in the script when you ship
+new tool classes.
+
+### Capability matrix
+
+Each MCP tool requires one or more capabilities. A token must hold **all**
+of the capabilities a tool requires to invoke it.
+
+| Capability | What it gates |
+|---|---|
+| `read`      | All Phase 2 read-only tools + activity + audit. Default if no attribute is present. |
+| `ra`        | All `ra_*` tools + `player_*` actions + `config_reload_mangosd`. |
+| `process`   | `process_start_*` / `process_stop_*` / `process_restart_*`. |
+| `write_db`  | Phase 3 content writes (account, item, gameobject, spell, instance, config, player actions). |
+| `worlds`    | `worlds_*` lifecycle tools. |
+| `bots`      | `bot_*` commands + `rotation_*` writes. |
+| `patches`   | `patch_*` generation tools + custom spell trainer wiring + delete. |
+| `baseline`  | `baseline_reset_*` (irreversible!) + `changegraph_revert_*`. |
+| `lootifier` | Lootifier / crafting-lootifier / quest-lootifier / profession tuning generation tools (Phase 7). |
+| `retexture` | Retexture pipeline (Phase 7). |
+
+Tokens with an empty `capabilities` array are superusers (granted all).
+The legacy `MCP_AUTH_TOKEN` env var is treated as a superuser for
+back-compat with Phase-0 deployments.
+
 ## Optional: AI services
 
 Enable with:

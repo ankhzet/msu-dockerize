@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Pre-downloads MangosSuperUI and SuperUI-Core release artifacts into ./vendor
-# for offline Docker builds. Run on the HOST (Linux/macOS) before build.
+# Pre-downloads MangosSuperUI and SuperUI-Core release artifacts into
+# vendor/builds/{core,ui}/ for offline Docker builds. Run on the HOST
+# (Linux/macOS) before build. After downloads, sync-vendor.sh is invoked
+# to refresh vendor/current/ symlinks + .meta sidecars.
 # =============================================================================
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VENDOR="$(pwd)/vendor"
-mkdir -p "$VENDOR"
+BUILDS_CORE="$VENDOR/builds/core"
+BUILDS_UI="$VENDOR/builds/ui"
+mkdir -p "$VENDOR" "$BUILDS_CORE" "$BUILDS_UI"
 
 # Load .env (if present)
 if [[ -f .env ]]; then
@@ -75,20 +79,33 @@ if [[ -z "$UI_URL" ]]; then
 fi
 # Derive a sensible filename from the URL
 UI_NAME=$(basename "$UI_URL")
-save_artifact "$UI_URL" "$VENDOR/$UI_NAME"
+save_artifact "$UI_URL" "$BUILDS_UI/$UI_NAME"
 
 # ---- SuperUI-Core ----
 echo
 echo "[2/4] SuperUI-Core $SUPERUI_CORE_VERSION"
-# SuperUI-Core uses GitHub Actions auto-generated artifact names like 'dev-<sha>.zip'
-CORE_URL=$(github_asset_url "Yafrovon/SuperUI-Core" ".zip" "$SUPERUI_CORE_VERSION")
-if [[ -z "$CORE_URL" ]]; then
-    echo "  WARNING: no .zip asset found. Check https://github.com/Yafrovon/SuperUI-Core/releases"
-    echo "  The asset may be named differently."
-fi
-if [[ -n "$CORE_URL" ]]; then
-    CORE_NAME=$(basename "$CORE_URL")
-    save_artifact "$CORE_URL" "$VENDOR/$CORE_NAME"
+# Two paths: prebuilt artifact (default) or compile-from-source (BUILD_FROM_SOURCE=1).
+# Source-build path produces vendor/dev-<sha>.tar.gz via the
+# superui-core-builder compose service, then the regular server Dockerfile
+# picks it up via its existing tar.gz/zip unpack logic.
+if [[ "${BUILD_FROM_SOURCE:-0}" == "1" ]]; then
+    echo "  BUILD_FROM_SOURCE=1: skipping prebuilt zip download."
+    echo "  The source tree is read from vendor/SuperUI-Core (git submodule)."
+    echo "  Run on the HOST first:  git submodule update --init vendor/SuperUI-Core"
+    echo "  Then build it:"
+    echo "    docker compose --profile source-build run --rm superui-core-builder"
+    echo "  Then: docker compose build mangosd"
+else
+    # SuperUI-Core uses GitHub Actions auto-generated artifact names like 'dev-<sha>.zip'
+    CORE_URL=$(github_asset_url "Yafrovon/SuperUI-Core" ".zip" "$SUPERUI_CORE_VERSION")
+    if [[ -z "$CORE_URL" ]]; then
+        echo "  WARNING: no .zip asset found. Check https://github.com/Yafrovon/SuperUI-Core/releases"
+        echo "  The asset may be named differently."
+    fi
+    if [[ -n "$CORE_URL" ]]; then
+        CORE_NAME=$(basename "$CORE_URL")
+        save_artifact "$CORE_URL" "$BUILDS_CORE/$CORE_NAME"
+    fi
 fi
 
 # ---- SuperUI-Core SQL files (small, ~few MB) ----
@@ -175,4 +192,9 @@ else
 fi
 
 echo
-echo "=== Done. Run 'docker compose build' to assemble the images. ==="
+echo "=== Done. ==="
+echo
+echo "Refreshing vendor/current/ symlinks..."
+"$(dirname "$0")/sync-vendor.sh"
+echo
+echo "Next: docker compose build"

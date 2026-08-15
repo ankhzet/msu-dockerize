@@ -1,0 +1,6 @@
+[submodule "vendor/SuperUI-Core"]
+	path = vendor/SuperUI-Core
+	url = https://github.com/Yafrovon/SuperUI-Core.git
+[submodule "vendor/MangosSuperUI"]
+	path = vendor/MangosSuperUI
+	url = https://github.com/Yafrovon/MangosSuperUI.git

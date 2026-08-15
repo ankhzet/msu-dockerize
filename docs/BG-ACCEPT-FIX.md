@@ -1,10 +1,10 @@
 # Task: make AiBotAI bots accept BG invites
 
-**Status:** closed (implemented + built + deployed 2026-08-15)
+**Status:** closed (BG accept + BG leave implemented + built + deployed 2026-08-15)
 **Discovered:** 2026-08-15
-**Severity:** functional gap — Alliance bots in Azure's group cannot enter Warsong Gulch (or any BG) automatically
-**Fix commit:** `feature/bridge-gear-up` branch (SuperUI-Core submodule)
-**Deployed binary:** md5 `78ac1d9013e8555d197d2594f2c7b042` (was `489c28bb...` prebuilt)
+**Severity:** functional gap — Alliance bots in Azure's group cannot enter Warsong Gulch (or any BG) automatically, and never resume normal AI when the match ends
+**Fix commits:** `feature/bridge-gear-up` branch (SuperUI-Core submodule)
+**Deployed binary:** md5 `bc142ad2288a986abb27cf2803494488` (was `489c28bb...` prebuilt)
 
 ## Symptom
 
@@ -101,6 +101,24 @@ docker exec mangos-world-server sh -c \
 ```
 
 The other half of the BG fix (the `map_template.map_type` assertion crash) is documented in the migration `20260815012935_world.sql` — set `map_type=3` for entries 30, 489, 529, 566, 607.
+
+### Followup: BG leave (same commit series)
+
+Once bots were inside BGs, a second bug surfaced: when a match ended, the BG system teleports the bot back via `HandleMoveWorldportAckOpcode` (server-side), but `AiBotAI::UpdateAI` never noticed — the bot kept running its player-set doctrine (PlayerParty / TeamAuto) on the base map, kept scanning for grind targets, kept wandering. `BattleBotAI` handled this via a `m_wasInBG` transition flag plus a virtual `OnLeaveBattleGround()` override; `AiBotAI` lacked both.
+
+Three changes (all in `src/game/SuperUiBots/AiBotAIMain.cpp`):
+
+1. **`bool m_wasInBG = false;`** member added. Tracks `InBattleGround()` transitions.
+2. **In `UpdateAI`, between `RefreshDoctrine()` and `UpdateBridgeTick()`**: detect the transitions. `true→false` → fire `OnLeaveBattleGround()` and log `[AIBOT-BG] X: BG ended — resuming normal AI`. `false→true` → log `[AIBOT-BG] X: entered BG — suppressing autonomous tasks`.
+3. **`OnLeaveBattleGround()` override** (new `virtual` in `CombatBotBaseAI`, overridden here): forces doctrine back to Solo via `m_doctrineKind = DoctrineKind::Solo; RefreshDoctrine();`, clears `m_receivedBgInvite`, calls `StopMoving()` to drop stale `MotionGenerator` state.
+
+The `m_doctrine = DOCTRINE_SOLO;` direct assignment I tried first doesn't compile — `m_doctrine` is a `std::unique_ptr<IEngagementDoctrine>`, not an enum. The right reset path is `m_doctrineKind = DoctrineKind::Solo;` (force the swap trigger) + `RefreshDoctrine()` (re-resolves and rebuilds the unique_ptr). The doctrine is `std::unique_ptr`, not assignable directly.
+
+While `m_wasInBG` is true, `UpdateAI` skips the normal autonomous-task block (`Decrement wander/patrol timer`, `RefreshDoctrine`, `UpdateRotationSlate`, etc.) and just runs `UpdateBridgeTick()` — same pattern BattleBotAI uses. The BG system drives position + combat inside the instance; running AI here would double-fire.
+
+The packet-level `SMSG_BATTLEFIELD_STATUS` handler in `CombatBotBaseAI::OnPacketReceived` also got a clarifying comment listing the four `BattleGroundStatus` values (1=queue, 2=invite, 3=in_progress, 4=wait_leave) so the next maintainer doesn't have to chase them down.
+
+End-to-end verification requires a BG match to actually end. In the dev server the bots get stranded (WSG instance has no navmesh extract) so matches never progress to a winner — that's an environment issue, not a code one. The pattern is identical to `BattleBotAI::UpdateBattleBot` which has been working for months (124+ `[BATTLEGROUND] ... honor` events with the same `m_wasInBG` / `OnLeaveBattleGround()` mechanism).
 
 ### Operator override
 

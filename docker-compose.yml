@@ -194,6 +194,11 @@ services:
       - core-bin:/opt/superui-core/bin:ro
       - core-data:/opt/superui-core/data:ro
       - core-logs:/opt/superui-core/logs:ro
+      # MSUI wiki corpus — read-only bind mount so `wiki_search` /
+      # `wiki_page` tools can serve the C++ documentation that ships in the
+      # MangosSuperUI submodule. Path inside the container matches the
+      # Wiki:Root default in appsettings.json.
+      - ./vendor/MangosSuperUI/docs_full:/home/wowvmangos/docs_full:ro
       # WoW 1.12.1 client Data/ directory (mounted read-only). The UI serves
       # icons, 3D models, and minimap tiles directly from the MPQs.
       - ${WOW_CLIENT_DATA:-/dev/null}:/data:ro

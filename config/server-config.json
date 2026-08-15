@@ -26,7 +26,15 @@
     "DbcPath":         "/opt/superui-core/data/5875/dbc",
     "MapsDataPath":    "/opt/superui-core/data/maps",
     "ServerDataPath":  "/opt/superui-core/data",
-    "ClientDataPath":  "/data/Data"
+    "ClientDataPath":  "/data/Data",
+
+    "//Commands": "Shell templates run by ProcessManagerService. Placeholders: {unit} = process name, {action} = start|stop|restart. Empty = service falls back to Process.Kill() (works in docker-compose where the UI shares mangosd's PID namespace). On a systemd host, set them to 'sudo systemctl {action} {unit}'.",
+    "MangosdStartCommand":   "",
+    "MangosdStopCommand":    "",
+    "MangosdRestartCommand": "",
+    "RealmdStartCommand":   "",
+    "RealmdStopCommand":    "",
+    "RealmdRestartCommand": ""
   },
 
   "RemoteAccess": {

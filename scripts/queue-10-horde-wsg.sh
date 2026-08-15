@@ -19,11 +19,11 @@
 
 set -euo pipefail
 
-CONTAINER="${1:-mangos-world-server}"
+CONTAINER="mangos-world-server"
 FIFO="/tmp/mangosd.console"
-COUNT=10
-BG_TYPE="warsong"
-FACTION="horde"
+COUNT=15
+BG_TYPE="arathi"
+FACTION="${1:-horde}"
 LEVEL=60
 
 if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
@@ -32,8 +32,6 @@ if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
     exit 1
 fi
 
-# Clear any existing battlebots first so the count stays clean.
-printf '.battlebot removeall\n' > "$FIFO" 2>/dev/null || true
 # (No way to write the FIFO from outside the container without docker exec,
 # so we use docker exec below for both writes.)
 
@@ -44,7 +42,8 @@ write_to_console() {
 }
 
 echo "Queueing ${COUNT} ${FACTION} battle bots for ${BG_TYPE} (level ${LEVEL})..."
-write_to_console ".battlebot removeall"
+# Clear any existing battlebots first so the count stays clean.
+# write_to_console ".battlebot removeall"
 
 for i in $(seq 1 "$COUNT"); do
     write_to_console ".battlebot add ${BG_TYPE} ${FACTION} ${LEVEL}"

@@ -79,8 +79,17 @@ services:
       RA_MIN_LEVEL: ${RA_MIN_LEVEL:-3}
       SUPERUI_CORE_VERSION: ${SUPERUI_CORE_VERSION:-latest}
     # RA port is exposed only to the host's localhost - never publicly
+    # 5000:5000 is added so the superui service (which shares this container's
+    # network namespace via `network_mode: service:mangosd`) is reachable from
+    # the host's localhost. Docker Compose forbids `ports:` on the side that
+    # joins the namespace, so we publish on the owning service.
+    # 8085 (world) + 3724 (game) are published so a real WoW 1.12.1 client on
+    # the host can reach the realm; realm.address should stay "127.0.0.1".
     ports:
       - "127.0.0.1:${MANGOSD_RA_PORT:-3443}:3443"
+      - "127.0.0.1:${UI_HTTP_PORT:-5000}:${UI_HTTP_PORT:-5000}"
+      - "127.0.0.1:${MANGOSD_WORLD_PORT:-8085}:${MANGOSD_WORLD_PORT:-8085}"
+      - "127.0.0.1:${MANGOSD_GAME_PORT:-3724}:${MANGOSD_GAME_PORT:-3724}"
     volumes:
       - core-data:/opt/superui-core/data
       - core-logs:/opt/superui-core/logs
@@ -117,6 +126,12 @@ services:
     # process-status checks always show "Offline" because they look up
     # /proc/<pid>/comm in their own (empty) PID namespace.
     pid: "service:mangosd"
+    # Share the mangosd container's network namespace so the BotBridgeService
+    # (UI listens on 127.0.0.1:3444) and AiBotAI (mangosd connects to
+    # 127.0.0.1:3444) see the same loopback. BRIDGE_HOST is hardcoded to
+    # 127.0.0.1 in src/game/SuperUiBots/AiBotAIMain.h — without this, the two
+    # containers' 127.0.0.1 are distinct and the bridge never connects.
+    network_mode: "service:mangosd"
     depends_on:
       mariadb:
         condition: service_healthy
@@ -143,8 +158,11 @@ services:
       OLLAMA_HOST: ${OLLAMA_HOST:-}
       COMFYUI_HOST: ${COMFYUI_HOST:-}
       MANGOS_SUPER_UI_VERSION: ${MANGOS_SUPER_UI_VERSION:-v1.2}
-    ports:
-      - "${UI_HTTP_PORT:-5000}:${UI_HTTP_PORT:-5000}"
+    # NOTE: no `ports:` here — Docker Compose forbids `ports:` on a service
+    # that joins another via `network_mode: service:X`. The host-side publish
+    # for the UI's HTTP port (5000) lives on the mangosd service above. The
+    # UI's BotBridge TCP listener (3444) is only used inside the shared netns
+    # (mangosd → 127.0.0.1:3444) and never published to the host.
     volumes:
       - ui-data:/opt/mangossuperui/data
       - ui-cache:/opt/mangossuperui/wwwroot/cache
@@ -166,8 +184,10 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-    networks:
-      - superui-net
+    # NOTE: no `networks:` here — `network_mode: service:mangosd` and a custom
+    # network are mutually exclusive in compose v2. The mangosd service is on
+    # `superui-net`, so the UI inherits it (and resolves `mariadb` via the
+    # embedded DNS at 127.0.0.11 in the shared netns).
 
   # ---------------------------------------------------------------------------
   # One-shot: VMaps/DBC/Maps extractor. Runs the SuperUI-Core bundled Extractors
@@ -292,6 +312,71 @@ services:
     networks:
       - superui-net
 
+  # ---------------------------------------------------------------------------
+  # One-shot: Build SuperUI-Core from source (mirrors the upstream CI workflow
+  # locally). Output is written to ./vendor/dev-<sha>.tar.gz and is then
+  # picked up by the regular `docker compose build mangosd` step.
+  # Profile "source-build" so it never auto-starts. Use:
+  #   docker compose --profile source-build run --rm superui-core-builder
+  #   docker compose build mangosd
+  #   docker compose up -d
+  # First build ~20-40 min. Subsequent builds are ~2-5 min thanks to ccache
+  # (cached in the ccache-core named volume).
+  # ---------------------------------------------------------------------------
+  superui-core-builder:
+    build:
+      context: .
+      dockerfile: docker/server/Dockerfile.builder
+    image: mangossuperui/core-builder:latest
+    container_name: mangos-core-builder
+    profiles: ["source-build"]
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "true"]
+    environment:
+      CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE:-RelWithDebInfo}
+      BUILD_EXTRACTORS: ${BUILD_EXTRACTORS:-1}
+    volumes:
+      - ccache-core:/root/.ccache
+      # Mount the whole project so the builder can drop its output into ./vendor/
+      # and so the SQL migration files in vendor/sql/ are picked up by the
+      # server image at build time.
+      - ./:/work
+    networks:
+      - superui-net
+
+  # ---------------------------------------------------------------------------
+  # One-shot: Build MangosSuperUI from the local submodule. Upstream has no CI
+  # workflow (the prebuilt zip is published manually) so this just runs
+  # `dotnet publish` against vendor/MangosSuperUI/. Output goes to
+  # ./vendor/msui-<sha>.tar.gz and is then picked up by `docker compose build
+  # superui`. Profile "source-build" so it never auto-starts. Use:
+  #   docker compose --profile source-build run --rm mangossuperui-ui-builder
+  #   docker compose build superui
+  #   docker compose up -d
+  # First build ~3-5 min (downloads NuGet packages). Subsequent ~30-60 sec
+  # thanks to the nuget-packages volume + dotnet's incremental build cache.
+  # ---------------------------------------------------------------------------
+  mangossuperui-ui-builder:
+    build:
+      context: .
+      dockerfile: docker/ui/Dockerfile.builder
+    image: mangossuperui/ui-builder:latest
+    container_name: mangos-ui-builder
+    profiles: ["source-build"]
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "true"]
+    environment:
+      DOTNET_BUILD_CONFIG: ${DOTNET_BUILD_CONFIG:-Release}
+      DOTNET_RUNTIME_ID: ${DOTNET_RUNTIME_ID:-linux-x64}
+      NUGET_PACKAGES: /root/.nuget/packages
+    volumes:
+      - nuget-packages:/root/.nuget/packages
+      - ./:/work
+    networks:
+      - superui-net
+
 networks:
   superui-net:
     driver: bridge
@@ -308,6 +393,12 @@ volumes:
   ui-patches:
   ollama-data:
   comfyui-data:
+  # Persistent ccache state for the source-builder. Survives container restarts
+  # so incremental rebuilds after `git pull` only recompile what changed.
+  ccache-core:
+  # Persistent NuGet package cache for the UI builder. Survives container
+  # restarts so `dotnet restore` only fetches packages that changed upstream.
+  nuget-packages:
 
   # ---------------------------------------------------------------------------
   # One-shot: Apply migrations (foreground, no daemon needed since it runs once)

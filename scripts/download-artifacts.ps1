@@ -35,6 +35,13 @@ $vendor = Join-Path (Get-Location) 'vendor'
 if (-not (Test-Path -LiteralPath $vendor)) {
     New-Item -ItemType Directory -Path $vendor -Force | Out-Null
 }
+$buildsCore = Join-Path $vendor 'builds/core'
+$buildsUi   = Join-Path $vendor 'builds/ui'
+foreach ($d in @($buildsCore, $buildsUi)) {
+    if (-not (Test-Path -LiteralPath $d)) {
+        New-Item -ItemType Directory -Path $d -Force | Out-Null
+    }
+}
 
 # Load .env (if present) for version pins
 $envFile = Join-Path (Get-Location) '.env'
@@ -123,12 +130,12 @@ try {
         -Repo 'Yafrovon/MangosSuperUI' `
         -AssetPattern '*LINUX*.zip' `
         -Tag $MANGOS_SUPER_UI_VERSION
-    Save-Artifact -Url $uiUrl -OutPath (Join-Path $vendor $uiName) -ExpectedSize $uiSize
+    Save-Artifact -Url $uiUrl -OutPath (Join-Path $buildsUi $uiName) -ExpectedSize $uiSize
 } catch {
     Write-Warning "  Failed: $_"
     Write-Warning "  Falling back to direct URL pattern (requires known tag)"
     $fallback = "https://github.com/Yafrovon/MangosSuperUI/releases/download/$MANGOS_SUPER_UI_VERSION/MSUI---LINUX---v1.2.2.zip"
-    Save-Artifact -Url $fallback -OutPath (Join-Path $vendor 'MSUI---LINUX---v1.2.2.zip')
+    Save-Artifact -Url $fallback -OutPath (Join-Path $buildsUi 'MSUI---LINUX---v1.2.2.zip')
 }
 
 # ---------- SuperUI-Core ----------
@@ -141,7 +148,7 @@ try {
         -Repo 'Yafrovon/SuperUI-Core' `
         -AssetPattern '*.zip' `
         -Tag $SUPERUI_CORE_VERSION
-    Save-Artifact -Url $coreUrl -OutPath (Join-Path $vendor $coreName) -ExpectedSize $coreSize
+    Save-Artifact -Url $coreUrl -OutPath (Join-Path $buildsCore $coreName) -ExpectedSize $coreSize
 } catch {
     Write-Warning "  Failed: $_"
     Write-Warning "  SuperUI-Core prebuilt resolves by tag. Check the latest release:"
@@ -203,5 +210,15 @@ if (-not $SkipWorldDb) {
 }
 
 Write-Host ""
-Write-Host "=== Done. Run 'docker compose build' to assemble the images. ==="
-Write-Host "Note: world DB archives are NOT downloaded by this script to save bandwidth."
+Write-Host "=== Done. ==="
+Write-Host ""
+Write-Host "Refreshing vendor/current/ symlinks..."
+$syncScript = Join-Path $PSScriptRoot 'sync-vendor.sh'
+if (Test-Path -LiteralPath $syncScript) {
+    # Run via bash (Git Bash / WSL / msys) so symlinks + stat behave the same as on Linux.
+    bash $syncScript
+} else {
+    Write-Warning "  sync-vendor.sh not found at $syncScript - run it manually before docker compose build"
+}
+Write-Host ""
+Write-Host "Next: docker compose build"

@@ -1,9 +1,9 @@
 # =============================================================================
 # SuperUI-Core (VMaNGOS fork) image
 # =============================================================================
-# Pre-built artifact is expected at ./vendor/dev-*.zip (or *.tar.gz)
-# SQL schema files are expected at ./vendor/sql/*.sql
-# Nothing is downloaded during build.
+# Reads the active archive from vendor/current/{core,core.meta} (set by
+# scripts/sync-vendor.sh on the host) and SQL schema files from
+# vendor/sql/. Nothing is downloaded during build.
 #
 # Runtime deps determined by `ldd` on the prebuilt mangosd/realmd:
 #   - libmariadb.so.3 (libmariadb3)
@@ -54,27 +54,34 @@ RUN mkdir -p \
     $SUPERCORE_HOME/logs \
     $SUPERCORE_HOME/run
 
-# Vendor expected at /vendor during build (bind mount)
-COPY vendor/ /vendor/
+# Pull just the two parts of the build context this image actually needs.
+# vendor/current/core is a symlink Docker follows into vendor/builds/core/*.
+# vendor/sql/ has the schema files (realmd/characters/logs + migrations/).
+COPY vendor/current/ /vendor/current/
+COPY vendor/sql/    $SUPERCORE_HOME/sql/
 
-# Install prebuilt binaries from the vendor cache
+# Install prebuilt binaries from the vendor cache.
+# vendor/current/core is an extensionless symlink to the active archive
+# (selected by scripts/sync-vendor.sh or scripts/switch-build.sh on the
+# host). vendor/current/core.meta is a sidecar that tells us the
+# archive's format - far simpler than path sniffing.
 RUN set -eux; \
-    CORE_PKG=$( \
-        ls /vendor/*.zip  2>/dev/null | grep -v 'MSUI' | head -n1; \
-        ls /vendor/*.tar.gz 2>/dev/null | head -n1; \
-        ls /vendor/*.tar.xz 2>/dev/null | head -n1; \
-    ); \
-    if [ -z "$CORE_PKG" ]; then \
-        echo "ERROR: no SuperUI-Core prebuilt artifact found in /vendor/"; \
-        echo "Run ./scripts/download-artifacts.sh on the host first."; \
+    META=/vendor/current/core.meta; \
+    ARCHIVE=/vendor/current/core; \
+    if [ ! -f "$META" ] || [ ! -e "$ARCHIVE" ]; then \
+        echo "ERROR: $META missing or $ARCHIVE broken."; \
+        echo "On the HOST, run ONE of:"; \
+        echo "  ./scripts/download-artifacts.sh"; \
+        echo "  docker compose --profile source-build run --rm superui-core-builder"; \
         exit 1; \
     fi; \
-    echo "Extracting $CORE_PKG"; \
-    case "$CORE_PKG" in \
-        *.zip)      unzip -q "$CORE_PKG" -d /tmp/ ;; \
-        *.tar.gz)   tar -xzf "$CORE_PKG" -C /tmp/ ;; \
-        *.tar.xz)   tar -xJf "$CORE_PKG" -C /tmp/ ;; \
-        *)          echo "Unsupported archive: $CORE_PKG"; exit 1 ;; \
+    FMT=$(grep -E '^format=' "$META" | cut -d= -f2 | tr -d '[:space:]'); \
+    echo "Installing $ARCHIVE (format=$FMT)"; \
+    case "$FMT" in \
+        zip)    unzip -q "$ARCHIVE" -d /tmp/ ;; \
+        tar.gz) tar -xzf "$ARCHIVE" -C /tmp/ ;; \
+        tar.xz) tar -xJf "$ARCHIVE" -C /tmp/ ;; \
+        *)      echo "ERROR: unknown format '$FMT' in $META"; exit 1 ;; \
     esac; \
     # Find the bin/ dir regardless of whether the archive had a wrapper dir
     BIN_SRC=$( \
@@ -83,7 +90,7 @@ RUN set -eux; \
         done \
     ); \
     if [ -z "$BIN_SRC" ]; then \
-        echo "ERROR: could not locate bin/mangosd in $CORE_PKG"; \
+        echo "ERROR: could not locate bin/mangosd in $ARCHIVE"; \
         ls -R /tmp; exit 1; \
     fi; \
     # Find the etc/ dir (may or may not exist in prebuilt)
@@ -102,8 +109,7 @@ RUN set -eux; \
     fi; \
     rm -rf /tmp/*
 
-# Copy bundled SQL files (from download-artifacts.sh).
-COPY vendor/sql/ $SUPERCORE_HOME/sql/
+# SQL files were already COPYed from vendor/sql/ above (alongside vendor/current/).
 # Create empty schema files if missing (for the bare-init case)
 RUN for f in realmd.sql characters.sql logs.sql mangos.sql; do touch $SUPERCORE_HOME/sql/$f; done
 

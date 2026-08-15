@@ -19,13 +19,19 @@ LABEL maintainer="MangosSuperUI Docker" \
 
 USER root
 
-# Bash for the entrypoint script
+# Bash for the entrypoint script + native libs that the published app's
+# bundled .so files dynamically load (SkiaSharp needs libfontconfig for
+# font discovery; without it SkiaSharp.SKObject's cctor throws and the
+# process exits during startup, which restarts the UI in a loop and
+# flaps the BotBridge TCP socket).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
         curl \
         tini \
+        libfontconfig1 \
+        libfreetype6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install layout
@@ -36,21 +42,32 @@ RUN mkdir -p \
     /var/mangossuperui/cache
 
 # Vendor expected at /vendor during build
-COPY vendor/ /vendor/
+COPY vendor/current/ /vendor/current/
 
-# Install the prebuilt zip
+# Install the prebuilt UI archive.
+# vendor/current/ui is an extensionless symlink to the active archive
+# (selected by scripts/sync-vendor.sh or scripts/switch-build.sh on the
+# host). vendor/current/ui.meta is a sidecar that tells us the archive's
+# format - far simpler than path sniffing.
 RUN set -eux; \
-    # Find MangosSuperUI Linux zip (vendor may have multiple zips, skip any
-    # that look like SuperUI-Core asset names)
-    ZIP=$(ls /vendor/*.zip 2>/dev/null | grep -E 'MSUI|MangosSuperUI' | head -n1); \
-    if [[ -z "$ZIP" ]]; then \
-        echo "ERROR: no MangosSuperUI Linux zip found in /vendor/"; \
-        echo "Run ./scripts/download-artifacts.ps1 on the host first."; \
+    apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/*; \
+    META=/vendor/current/ui.meta; \
+    ARCHIVE=/vendor/current/ui; \
+    if [ ! -f "$META" ] || [ ! -e "$ARCHIVE" ]; then \
+        echo "ERROR: $META missing or $ARCHIVE broken."; \
+        echo "On the HOST, run ONE of:"; \
+        echo "  ./scripts/download-artifacts.sh"; \
+        echo "  docker compose --profile source-build run --rm mangossuperui-ui-builder"; \
         exit 1; \
     fi; \
-    echo "Extracting $ZIP"; \
-    apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/*; \
-    unzip -q "$ZIP" -d $MANGOSSUPERUI_HOME; \
+    FMT=$(grep -E '^format=' "$META" | cut -d= -f2 | tr -d '[:space:]'); \
+    echo "Installing $ARCHIVE (format=$FMT)"; \
+    case "$FMT" in \
+        zip)    unzip -q "$ARCHIVE" -d $MANGOSSUPERUI_HOME ;; \
+        tar.gz) tar -xzf "$ARCHIVE" -C $MANGOSSUPERUI_HOME ;; \
+        tar.xz) tar -xJf "$ARCHIVE" -C $MANGOSSUPERUI_HOME ;; \
+        *)      echo "ERROR: unknown format '$FMT' in $META"; exit 1 ;; \
+    esac; \
     # Verify the DLL is present
     test -f $MANGOSSUPERUI_HOME/MangosSuperUI.dll || \
         (echo "ERROR: MangosSuperUI.dll not found after extraction"; ls -la $MANGOSSUPERUI_HOME; exit 1); \

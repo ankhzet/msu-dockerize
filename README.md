@@ -119,6 +119,71 @@ This stack is **bare by default** — you decide what to download and when.
 
 `WOW_CLIENT_DATA` should point at the directory containing `dbc/`, `maps/`, `vmaps/`, `mmaps/`, `Cameras/`. If you only have the original `Data/` folder (containing the `.MPQ` archives), the UI can read those directly — see `CLIENT_DATA_PATH` env var.
 
+## Build from source (optional)
+
+By default the stack consumes the upstream prebuilt zips (one for SuperUI-Core,
+one for MangosSuperUI). If you want to compile them yourself, both repos are
+vendored as git submodules and can be built by dedicated compose services.
+
+### SuperUI-Core (the C++ world/auth server)
+
+Upstream has a GitHub Actions workflow that builds Ubuntu 24.04 binaries.
+This builder mirrors it verbatim (same apt deps, same cmake flags, same
+output layout) but reads the source from the local submodule and drops its
+result at `./vendor/dev-<sha>.tar.gz`.
+
+```bash
+git submodule update --init vendor/SuperUI-Core
+
+docker compose --profile source-build run --rm superui-core-builder
+docker compose build mangosd
+docker compose up -d
+```
+
+To pick up newer upstream commits:
+
+```bash
+git submodule update --remote vendor/SuperUI-Core
+docker compose --profile source-build run --rm superui-core-builder
+```
+
+* First build: ~20-40 minutes. Subsequent: ~2-5 minutes via persistent `ccache`.
+
+### MangosSuperUI (the ASP.NET Core 8.0 web UI)
+
+Upstream has no build action — the prebuilt zip is published manually via
+`dotnet publish` (see `vendor/MangosSuperUI/MangosSuperUI/Properties/PublishProfiles/FolderProfile.pubxml`).
+This builder replicates that locally and drops its result at
+`./vendor/msui-<sha>.tar.gz`.
+
+```bash
+git submodule update --init vendor/MangosSuperUI
+
+docker compose --profile source-build run --rm mangossuperui-ui-builder
+docker compose build superui
+docker compose up -d
+```
+
+To pick up newer upstream commits:
+
+```bash
+git submodule update --remote vendor/MangosSuperUI
+docker compose --profile source-build run --rm mangossuperui-ui-builder
+```
+
+* First build: ~3-5 minutes (downloads NuGet packages). Subsequent: ~30-60 seconds
+  via persistent `nuget-packages` volume.
+
+Tunable knobs in `.env`:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `BUILD_FROM_SOURCE` | `0` | `1` enables the source-build path above |
+| `CMAKE_BUILD_TYPE` | `RelWithDebInfo` | SuperUI-Core only. `RelWithDebInfo` (default, with debug symbols) / `Release` (smaller, no symbols) / `Debug` (unoptimized) |
+| `BUILD_EXTRACTORS` | `1` | SuperUI-Core only. `0` skips `MoveMapGenerator`/`VMapExtractor`/etc. to save a few minutes |
+| `DOTNET_BUILD_CONFIG` | `Release` | MangosSuperUI only. `Release` (matches upstream pubxml) / `Debug` |
+| `DOTNET_RUNTIME_ID` | `linux-x64` | MangosSuperUI only. RID passed to `dotnet publish`. The prebuilt zips target this. |
+
 ## Configuration
 
 All settings live in `.env`. The most important ones:
@@ -155,6 +220,79 @@ by the `ollama-puller` sidecar. Override with `OLLAMA_MODEL` in `.env`.
 The ComfyUI models are also optional and pulled on first run by the upstream
 image's own startup script. To preload a specific model, mount it at
 `comfyui-data:/root/ComfyUI/models/checkpoints`.
+
+## Vendor layout (builds + active pointer)
+
+Artifacts live in two layers so you can keep historical builds around for
+rollback without bloating the runtime image:
+
+```
+vendor/
+├── builds/                          # gitignored - every build ever made
+│   ├── core/
+│   │   ├── dev-2300e1e.zip                 # upstream prebuilt
+│   │   ├── dev-2300e1e8c5b0559883e1.tar.gz # source-built
+│   │   └── ...
+│   └── ui/
+│       ├── MSUI---LINUX---v1.2.2.zip
+│       ├── msui-1e0e7fcdcc95802dd246.tar.gz
+│       └── ...
+├── current/                         # in build context - the "active" pointer
+│   ├── core                         # hardlink -> active core archive
+│   ├── core.meta                    # format=tar.gz / source=source-built
+│   ├── ui                           # hardlink -> active UI archive
+│   └── ui.meta                      # format=tar.gz / source=source-built
+├── sql/                             # schema files (base + migrations/)
+├── world-2021.7z                    # world DB (excluded from Docker context)
+├── SuperUI-Core/                    # submodule source (excluded from Docker context)
+└── MangosSuperUI/                   # submodule source (excluded from Docker context)
+```
+
+* `vendor/builds/` is gitignored and excluded from the Docker context.
+  Every artifact ever produced (by `download-artifacts.sh` or the source
+  builders) lands here and stays until you prune it.
+* `vendor/current/core` and `vendor/current/ui` are **hardlinks** (not
+  symlinks — Docker COPY on Windows preserves symlinks as broken symlinks
+  in the image; hardlinks COPY as regular files). They point at whichever
+  archive you currently consider "active".
+* `vendor/current/{core,ui}.meta` are tiny sidecars that tell the runtime
+  Dockerfiles the archive format (`tar.gz` / `zip` / `tar.xz`) and
+  provenance (`source-built` / `upstream`).
+* Switching the active build is a single `ln` (atomic) — see
+  [`scripts/switch-build.sh`](scripts/switch-build.sh).
+
+### Switching the active build
+
+```bash
+# List what you've got
+scripts/switch-build.sh --list
+scripts/switch-build.sh --current
+
+# Interactive pick (prompts per category)
+scripts/switch-build.sh
+scripts/switch-build.sh core
+
+# Non-interactive: point at a specific archive
+scripts/switch-build.sh core dev-2300e1e.zip
+scripts/switch-build.sh ui   msui-1e0e7fc.tar.gz
+
+# Switch to the freshest build in each category (same as sync-vendor.sh)
+scripts/switch-build.sh core latest
+```
+
+After switching:
+
+```bash
+docker compose build        # picks up the new current/core and current/ui
+docker compose up -d
+```
+
+### Pruning old builds
+
+```bash
+# Keep only the 3 most-recent artifacts per category (oldest deleted)
+scripts/sync-vendor.sh --keep 3
+```
 
 ## Bandwidth budget
 
@@ -234,11 +372,15 @@ MangosSuperUI/
 │   ├── init-database.sh        # bare/standard/full DB init
 │   └── mangos.ps1              # day-to-day wrapper
 ├── docker/
-│   ├── server/                 # SuperUI-Core image
-│   │   ├── Dockerfile
+│   ├── server/                 # SuperUI-Core runtime image
+│   │   ├── Dockerfile          # runtime: extracts vendor/dev-*.{zip,tar.gz}
+│   │   ├── Dockerfile.builder  # builder: ubuntu:24.04, mirrors upstream CI
+│   │   ├── build-core.sh       # entrypoint for the builder image
 │   │   └── entrypoint.sh
-│   └── ui/                     # MangosSuperUI image
-│       ├── Dockerfile
+│   └── ui/                     # MangosSuperUI runtime image
+│       ├── Dockerfile          # runtime: extracts vendor/{MSUI,msui}-*.{zip,tar.gz}
+│       ├── Dockerfile.builder  # builder: dotnet sdk:8.0, dotnet publish
+│       ├── build-ui.sh         # entrypoint for the builder image
 │       └── entrypoint.sh
 ├── config/
 │   ├── mangosd.conf.dist       # world server config template

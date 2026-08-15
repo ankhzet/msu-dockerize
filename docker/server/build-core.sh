@@ -32,6 +32,8 @@ BUILD_EXTRACTORS="${BUILD_EXTRACTORS:-1}"
 WORK="${WORK:-/work}"
 SRC="${SRC:-$WORK/vendor/SuperUI-Core}"
 OUT_DIR="$WORK/vendor/builds/core"
+UPSTREAM_URL="https://github.com/Yafrovon/SuperUI-Core.git"
+UPSTREAM_BRANCH="${UPSTREAM_BRANCH:-development}"
 
 echo "================================================"
 echo " SuperUI-Core source build"
@@ -45,17 +47,49 @@ echo "================================================"
 if [[ ! -f "$SRC/CMakeLists.txt" ]]; then
     echo ""
     echo "ERROR: $SRC is not a SuperUI-Core source tree (no CMakeLists.txt)."
-    echo "On the HOST, run:"
-    echo "  git submodule update --init vendor/SuperUI-Core"
-    echo "or, to pull the latest upstream commit:"
-    echo "  git submodule update --remote vendor/SuperUI-Core"
-    echo ""
-    exit 1
+    if [[ -d "$SRC/.git" ]]; then
+        echo "  Repo exists but HEAD is detached or branch has been wiped."
+        echo "  Run on the HOST:"
+        echo "    git submodule update --init vendor/SuperUI-Core"
+    else
+        echo "  Source directory is empty or missing."
+        echo "  Initialising and fetching upstream ($UPSTREAM_URL @ $UPSTREAM_BRANCH)..."
+        mkdir -p "$SRC"
+        cd "$SRC"
+        git init -q
+        git remote add origin "$UPSTREAM_URL"
+        git fetch --depth=1 origin "$UPSTREAM_BRANCH"
+        git checkout -q FETCH_HEAD
+        cd - >/dev/null
+    fi
+    if [[ ! -f "$SRC/CMakeLists.txt" ]]; then
+        echo "FATAL: $SRC still doesn't have CMakeLists.txt after fetch."
+        exit 1
+    fi
 fi
 
 cd "$SRC"
-SHA="$(git -C "$SRC" rev-parse --short=20 HEAD 2>/dev/null || echo unknown)"
-echo "==> HEAD: $SHA"
+
+# SHA label = HEAD commit; if the working tree has uncommitted changes,
+# suffix -wip so consecutive local rebuilds don't collide on filename.
+# Only check if we're inside a git repo — git erroring with "not a git
+# repository" (exit 128/129) would otherwise be misread as "dirty" and
+# stamp every CI build with -wip.
+if [[ -d "$SRC/.git" ]]; then
+    HEAD_SHA="$(git rev-parse --short=20 HEAD 2>/dev/null || echo unknown)"
+    if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null || [[ -n "$(git ls-files --others --exclude-standard 2>/dev/null)" ]]; then
+        DIRTY_TAG="${HEAD_SHA}-wip"
+        DIRTY_MSG=" (working tree dirty — WIP changes included)"
+    else
+        DIRTY_TAG="${HEAD_SHA}"
+        DIRTY_MSG=""
+    fi
+else
+    HEAD_SHA="no-git"
+    DIRTY_TAG="no-git"
+    DIRTY_MSG=" (no .git directory — using source as-is)"
+fi
+echo "==> HEAD: ${HEAD_SHA}${DIRTY_MSG}"
 
 mkdir -p "$OUT_DIR"
 
@@ -72,7 +106,7 @@ cmake --build build --parallel "$JOBS"
 echo "==> Installing to /install"
 cmake --install build
 
-OUT_NAME="${OUT_NAME:-dev-$SHA.tar.gz}"
+OUT_NAME="${OUT_NAME:-dev-$DIRTY_TAG.tar.gz}"
 OUT_PATH="$OUT_DIR/$OUT_NAME"
 
 echo "==> Packaging $OUT_PATH"

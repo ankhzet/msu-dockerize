@@ -274,6 +274,40 @@ For now, players learn Penance from a Priest class trainer at level 40 / 70. Thi
 - The C++ side could add a `.learn_penance` GM command and grant it on respec/spec change.
 - Bot AI can be told (via rotation profile) to take Penance as the highest-priority spell.
 
+## 9. ROOT CAUSE of "spell isn't in trainer gossip" (found post-v1)
+
+After teaching Azure the spells via `msui_patch_teach_spell`, the spells appeared in her spellbook BUT the trainer gossip menu still didn't list Penance. Found by:
+
+```
+grep "npc_trainer_template" /opt/superui-core/logs/mangosd-direct.log
+→ Table `npc_trainer_template` for trainer (Entry: 7) has non-learning spell 40010, ignore
+→ Table `npc_trainer_template` for trainer (Entry: 7) has non-learning spell 40011, ignore
+... (8 lines for the 4 Penance IDs × 2 templates)
+```
+
+**Root cause:** vanilla `ObjectMgr::LoadTrainers()` (line 10366) **silently drops** any `npc_trainer_template` row whose spell has `Effect[0] != SPELL_EFFECT_LEARN_SPELL (36)`. My Penance had `Effect[0] = APPLY_AURA (6)` (the channel aura), so every trainer entry was rejected at load time.
+
+**Fix (commit pending):**
+
+1. Create 4 **wrapper spells** (40018-40021) with `Effect[0] = 36 (LEARN_SPELL)` + `EffectTriggerSpell[0]` pointing at the real Penance spell.
+   - `40018` → teaches `40010` (Penance R1 damage)
+   - `40019` → teaches `40011` (Penance R2 damage)
+   - `40020` → teaches `40015` (Penance R1 heal)
+   - `40021` → teaches `40017` (Penance R2 heal)
+
+2. `npc_trainer_template` now references the wrapper IDs (40018-40021) instead of the raw Penance IDs (40010-40017). Player clicks "Learn" → wrapper casts LEARN_SPELL → player learns the underlying Penance spell via its trigger.
+
+3. Deleted the orphan raw-Penance trainer rows.
+
+4. Fixed `spell_chain.req_spell` to 0 for rank-2 entries (was pointing to previous rank, triggering a `required rank spell from same chain` warning in `SpellMgr`).
+
+**Same pattern as vanilla's Arcane Missiles:** wrapper spell 8420 (`Effect[0]=36`) teaches the channel spell 8418. The wrapper pattern is how vanilla trainers work — the actual spell is always wrapped in a LEARN_SPELL entry. I missed this when designing Penance.
+
+Verified:
+- `.spell info 40018` → `40018 - Penance, rank 1 enUS [learn]`
+- `trainer_template` reloaded: 2762 trainer template spells (8 more than before — 4 wrappers × 2 templates).
+- No more `non-learning spell` errors in the log for wrapper IDs.
+
 ## 7. References
 
 - wowhead WotLK Penance R1: https://web.archive.org/web/20231003070923/https://www.wowhead.com/wotlk/spell=47540/penance

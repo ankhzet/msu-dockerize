@@ -169,12 +169,16 @@ Prebuilt `dev-2300e1e` lacked `SuperUiBots/`. **Source-built mangosd** at commit
 **Penance (WotLK Discipline Priest talent) — SHIPPED.** Custom spell entries
 40010 (R1 damage) / 40011 (R2 damage) / 40012 (R1 tick) / 40013 (R2 tick) /
 40014 (R1 heal tick) / 40015 (R1 heal) / 40016 (R2 heal tick) / 40017 (R2 heal)
-loaded into `spell_template` at `build=5875`. Implemented via the existing
-vanilla `SPELL_AURA_PERIODIC_TRIGGER_SPELL` pattern (compare Arcane Missiles
-spell 5143) — no custom C++ script required. Two separate main spells
-(target enemy vs target ally) match WotLK's 47540/47788 dual-entry approach.
-Trainer wiring: `npc_trainer_template` entry=7 (Alliance Priest) AND entry=8
-(Horde Priest) at level 40 (1g) / level 70 (1.5g).
+loaded into `spell_template` at `build=5875`. Plus **wrapper spells**
+40018-40021 (Effect[0]=LEARN_SPELL) that the trainer teaches — vanilla's
+`ObjectMgr::LoadTrainers` rejects any npc_trainer_template row whose
+spell doesn't have `Effect[0]=LEARN_SPELL`, so the wrappers are
+required. Two separate main spells (target enemy vs target ally)
+match WotLK's 47540/47788 dual-entry approach. Implemented via the
+existing vanilla `SPELL_AURA_PERIODIC_TRIGGER_SPELL` pattern (compare
+Arcane Missiles spell 5143) — no custom C++ script required.
+Trainer wiring: `npc_trainer_template` entry=7 (Alliance Priest) AND
+entry=8 (Horde Priest) at level 40 (1g) / level 70 (1.5g).
 **Known gap**: not a talent — Penance is taught by class trainer, not
 allocated via the Disc talent tree. Adding it to the talent UI requires
 client-side `Talent.dbc` + `TalentTab.dbc` patching + MPQ repackaging

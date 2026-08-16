@@ -287,7 +287,7 @@ grep "npc_trainer_template" /opt/superui-core/logs/mangosd-direct.log
 
 **Root cause:** vanilla `ObjectMgr::LoadTrainers()` (line 10366) **silently drops** any `npc_trainer_template` row whose spell has `Effect[0] != SPELL_EFFECT_LEARN_SPELL (36)`. My Penance had `Effect[0] = APPLY_AURA (6)` (the channel aura), so every trainer entry was rejected at load time.
 
-**Fix (commit pending):**
+**Fix:**
 
 1. Create 4 **wrapper spells** (40018-40021) with `Effect[0] = 36 (LEARN_SPELL)` + `EffectTriggerSpell[0]` pointing at the real Penance spell.
    - `40018` → teaches `40010` (Penance R1 damage)
@@ -307,6 +307,40 @@ Verified:
 - `.spell info 40018` → `40018 - Penance, rank 1 enUS [learn]`
 - `trainer_template` reloaded: 2762 trainer template spells (8 more than before — 4 wrappers × 2 templates).
 - No more `non-learning spell` errors in the log for wrapper IDs.
+
+## 10. Final state — Azure's spellbook
+
+Azure (guid=2, level 60 Priest) now has all 4 real Penance spells in `character_spell`:
+- `40010` (Penance R1 damage, school 6/Holy, icon 237/Smite)
+- `40011` (Penance R2 damage, level 70 req)
+- `40015` (Penance R1 heal, icon 242/Flash Heal)
+- `40017` (Penance R2 heal, level 70 req)
+
+When she logs in, her spellbook (priest_holy tab) shows Penance R1 (dmg) and R1 (heal). She can drag them to action bars and cast.
+
+**Trainer gossip state for a level-60 Priest:**
+- Penance R1 dmg wrapper (40018): **GRAY** — already known (Azure has 40010)
+- Penance R2 dmg wrapper (40019): **RED** — level req 70, Azure is 60
+- Penance R1 heal wrapper (40020): **GRAY** — already known (Azure has 40015)
+- Penance R2 heal wrapper (40021): **RED** — level req 70
+
+This is the correct vanilla behavior — `ObjectMgr::LoadTrainers` shows GRAY/RED spells in the gossip so the player knows they exist but can't be learned yet. The "not in gossip" complaint was because the wrappers were never in the gossip at all (silent load failure — fixed by switching to LEARN_SPELL wrappers).
+
+To unlock R2, the player needs to ding 70 and have the appropriate level — then the wrappers turn GREEN and can be purchased from the trainer.
+
+## 11. VMaNGOS proper-process notes (research 2026-08-16)
+
+VMaNGOS docs (`github.com/vmangos/wiki`) do **not** document a custom-spell creation process. The project philosophy (Contribution Guide):
+> "If it can be done in the database, do it there. When scripting something, it is preferable that you do it using the database scripting engine if possible. ScriptDev is for complex encounters that cannot be done any other way."
+
+For custom spells:
+- `spell_template` — DB-side overrides of client DBC data; loaded at startup with `MAX(build <= SUPPORTED_CLIENT_BUILD)`
+- `skill_line_ability` — controls which spellbook tab the spell appears in
+- `spell_chain` — rank chain (prev/first/rank/req_spell)
+- `npc_trainer_template` — must reference a wrapper with `Effect[0] = SPELL_EFFECT_LEARN_SPELL (36)`, NOT the actual spell
+- For visual client-side: client `Spell.dbc` must be patched (out of scope for this project — see §6 of this doc)
+
+The wrapper+LEARN_SPELL pattern is the universal vanilla convention — confirmed via Arcane Missiles (5143 channel ↔ 8420 trainer wrapper ↔ 8418 trigger). My v1 missed this; v2 fixed it.
 
 ## 7. References
 

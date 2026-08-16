@@ -166,27 +166,58 @@ Prebuilt `dev-2300e1e` lacked `SuperUiBots/`. **Source-built mangosd** at commit
 
 ## Next milestone
 
-**Penance (WotLK Discipline Priest talent) — SHIPPED.** Custom spell entries
-40010 (R1 damage) / 40011 (R2 damage) / 40012 (R1 tick) / 40013 (R2 tick) /
-40014 (R1 heal tick) / 40015 (R1 heal) / 40016 (R2 heal tick) / 40017 (R2 heal)
-loaded into `spell_template` at `build=5875`. Plus **wrapper spells**
-40018-40021 (Effect[0]=LEARN_SPELL) that the trainer teaches — vanilla's
-`ObjectMgr::LoadTrainers` rejects any npc_trainer_template row whose
-spell doesn't have `Effect[0]=LEARN_SPELL`, so the wrappers are
-required. Two separate main spells (target enemy vs target ally)
-match WotLK's 47540/47788 dual-entry approach. Implemented via the
-existing vanilla `SPELL_AURA_PERIODIC_TRIGGER_SPELL` pattern (compare
-Arcane Missiles spell 5143) — no custom C++ script required.
-Trainer wiring: `npc_trainer_template` entry=7 (Alliance Priest) AND
-entry=8 (Horde Priest) at level 40 (1g) / level 70 (1.5g). **Final
-state for level-60 priest**: R1 wrappers GRAY (already known), R2
-wrappers RED (level req 70) — both shown in gossip, not invisible.
-**Known gap**: not a talent — Penance is taught by class trainer, not
-allocated via the Disc talent tree. Adding it to the talent UI requires
-client-side `Talent.dbc` + `TalentTab.dbc` patching + MPQ repackaging
-(Phase 8, ~2-3 days work — no `PatchBuilderService` support yet).
-Plan: [`docs/TODO-FEAT-PENANCE.md`](docs/TODO-FEAT-PENANCE.md).
-Migration: `vendor/sql/migrations/20260816081942_world.sql`.
+**Penance (WotLK Discipline Priest talent) — v1 impl ROLLED BACK.
+Change of plan:** instead of hand-rolling the DB rows, use the existing
+`/Patch` spell-creation wizard which already implements the
+wrapper+LEARN_SPELL pattern correctly (see `PatchController.Generate` →
+`SpellCreatorService.CreateTrainerWrapperAsync`). The wizard also
+handles icon generation (FLUX Q5), texture themes, MPQ packaging,
+and client-side patch output.
+
+**Why rolled back**: the v1 manual DB inserts (8 spell_template rows +
+4 wrappers + 2 rank chains + 4 SLA rows + 8 trainer_template entries)
+hit a wall — `vanilla's ObjectMgr::LoadTrainers` silently rejects any
+trainer row whose spell has `Effect[0] != SPELL_EFFECT_LEARN_SPELL (36)`,
+and the wrapper pattern wasn't obvious from the docs. After discovering
+it manually via `grep "non-learning spell" mangosd.log`, the wizard
+already had this exact pattern built in. v1 worked but required
+understanding the wrapper pattern manually.
+
+**Cleanup performed (2026-08-16)**:
+- DELETE from `spell_template WHERE entry BETWEEN 40010 AND 40999`
+- DELETE from `skill_line_ability WHERE spell_id BETWEEN 40010 AND 40999`
+- DELETE from `spell_chain WHERE spell_id BETWEEN 40010 AND 40999`
+- DELETE from `npc_trainer_template WHERE spell BETWEEN 40010 AND 40999`
+- DELETE from `characters.character_spell WHERE spell BETWEEN 40010 AND 40999`
+- Removed `vendor/sql/migrations/20260816081942_world.sql`
+- `.reload spell_template` + `.reload npc_trainer` to refresh server cache
+
+**Fix shipped in 7021d5a / b95dd49 (submodule)**: `/Patch/SearchSource`
+was returning 500 because Dapper returns MySQL `smallint unsigned`
+columns as `Int32`, and the direct unboxing cast `(uint)r.entry` threw
+`Object must be of type UInt32`. Three call sites in
+`PatchController.SearchSource` were affected (HashSet projection,
+dictionary lookup, OrderBy lambda). Fix: replace all `(uint)r.X` with
+`(uint)(int)r.X` — the two-stage cast normalizes any numeric source
+type. `Convert.ToUInt32` does NOT work in dynamic contexts (compiler
+can't infer `out var` type). Verified: HTTP 200 for
+`/Patch/SearchSource?q=Holy`.
+
+**Next moves**:
+- Re-implement Penance via the `/Patch` wizard at
+  http://192.168.3.107:5000/Patch (source: Mind Blast for damage,
+  Greater Heal for heal; school=6 Holy; damage 120/121 R1, 152/153 R2;
+  heal 336/337 R1, 421/422 R2; manaCostPercentage=16, cooldown=12000;
+  GenerateAllRanks=true; CopySourceTrainers=true; TextureTheme=holy).
+- Add the wizard-driven spell IDs to the doc as a v2 (replaces v1
+  manual approach).
+- Optional v3: client-side `Talent.dbc` + `TalentTab.dbc` patching +
+  MPQ repackaging for the Disc tree UI (~2-3 days; no
+  PatchBuilderService support yet).
+
+Reference docs kept for history:
+[`docs/TODO-FEAT-PENANCE.md`](docs/TODO-FEAT-PENANCE.md) — research +
+wrapper pattern discovery + root cause analysis.
 
 **MCP server** (status: Phase 1–6 SHIPPED in commit `50ed641` / submodule
 `0e35de2`). Next moves if you want to keep extending it:

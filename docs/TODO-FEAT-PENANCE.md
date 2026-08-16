@@ -251,9 +251,28 @@ A full visual patch (SpellIcon.dbc, SpellVisual.dbc, SpellVisualKit.dbc edits) r
 ## 6. Out of scope (explicit)
 
 - **Client-side SpellIcon.dbc / SpellVisual.dbc patch.** Requires extracting DBCs from a 3.3.5 client and running them through `PatchBuilderService`. Document as Phase 7 follow-up; not blocking functional correctness.
-- **Talent tree insertion.** Penance as a *trainer spell* (not a talent rank) is sufficient for the v1 feature — Disc priest trainers teach it directly. Adding it to the talent UI requires editing TalentTab.dbc, which is also a client-side DBC patch and out of scope.
+- **Talent tree insertion (BIG GAP — see §8).** Penance as a *trainer spell* (not a talent rank) is functional but doesn't match WotLK's "5-rank talent row in the Disc tree" UX. The current v1 ships it as a direct trainer spell — players learn it from a Priest class trainer at level 40 (R1) / level 70 (R2). Adding it to the talent UI requires editing **Talent.dbc + TalentTab.dbc + repackaging as a client MPQ patch** — none of the existing PatchBuilderService methods handle these DBCs.
 - **Grace, Borrowed Time, Rapture talent interactions.** WotLK Disc mechanics — vanilla equivalent doesn't exist. The heal path in Phase 3 doesn't stack Grace. Adding it would require a new aura system; punt to v2.
 - **Penance cast on self.** WotLK added this in 3.1; we'll skip it for v1 to avoid a unit-test matrix explosion.
+
+## 8. Known gaps after v1 ship (2026-08-16)
+
+After the v1 commit (`891f00a`), user feedback flagged:
+
+1. **Azure didn't have the spell** — `.patch teach_spell` was only called on the bot, not on the player. *Fixed at runtime*: taught 40010/40011/40015/40017 to Azure (guid=2) via `msui_patch_teach_spell`. For a permanent fix, add a `character_create_data` row or grant Penance to all level-40+ Priests on next login.
+2. **Trainer didn't have the spell** — `npc_trainer_template` was only populated for entry=8 (Horde priest trainers). Alliance priest trainers (Priestess Anetta, Branstock Khalder, etc.) use `trainer_id=7`. *Fixed at runtime and migration*: added 40010/40011/40015/40017 to both template 7 and 8. Migration updated.
+3. **No corresponding talent in the Disc tree** — this is the **untackled gap**. To ship this properly:
+   - Add `TalentEntry` / `TalentTabEntry` DBC structures to `PatchBuilderService` (currently only Spell.dbc / SpellVisual.dbc / SpellVisualKit.dbc / SpellVisualEffectName.dbc).
+   - Implement DBC write/read for `Talent.dbc` and `TalentTab.dbc`.
+   - Insert a new Talent.dbc row with 5 ranks of Penance spell IDs. (WotLK has 5 ranks; vanilla Disc has 6 tiers — we'd insert at tier 5, column N to match WotLK layout.)
+   - Reference the new talent's `TalentID` from the existing Discipline `TalentTab.dbc` entry (tab_page=3 — HolDisc 1, or one of the other tabs).
+   - Pack into MPQ and ship as a client-side patch.
+   - Verify the talent shows up in the Disc tree in-game when the player opens talents.
+   - Estimated effort: **2-3 days** of dedicated work — significant scope. Document as a Phase 8 follow-up.
+
+For now, players learn Penance from a Priest class trainer at level 40 / 70. This works but doesn't match WotLK's "5-rank talent row" feel. To improve UX without the full talent patch:
+- The C++ side could add a `.learn_penance` GM command and grant it on respec/spec change.
+- Bot AI can be told (via rotation profile) to take Penance as the highest-priority spell.
 
 ## 7. References
 

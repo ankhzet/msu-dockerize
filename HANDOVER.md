@@ -173,8 +173,13 @@ loaded into `spell_template` at `build=5875`. Implemented via the existing
 vanilla `SPELL_AURA_PERIODIC_TRIGGER_SPELL` pattern (compare Arcane Missiles
 spell 5143) — no custom C++ script required. Two separate main spells
 (target enemy vs target ally) match WotLK's 47540/47788 dual-entry approach.
-Trainer wiring: `npc_trainer_template` entry=8 (Priest class trainer) at
-level 40 (1g) / level 70 (1.5g). Plan: [`docs/TODO-FEAT-PENANCE.md`](docs/TODO-FEAT-PENANCE.md).
+Trainer wiring: `npc_trainer_template` entry=7 (Alliance Priest) AND entry=8
+(Horde Priest) at level 40 (1g) / level 70 (1.5g).
+**Known gap**: not a talent — Penance is taught by class trainer, not
+allocated via the Disc talent tree. Adding it to the talent UI requires
+client-side `Talent.dbc` + `TalentTab.dbc` patching + MPQ repackaging
+(Phase 8, ~2-3 days work — no `PatchBuilderService` support yet).
+Plan: [`docs/TODO-FEAT-PENANCE.md`](docs/TODO-FEAT-PENANCE.md).
 Migration: `vendor/sql/migrations/20260816081942_world.sql`.
 
 **MCP server** (status: Phase 1–6 SHIPPED in commit `50ed641` / submodule

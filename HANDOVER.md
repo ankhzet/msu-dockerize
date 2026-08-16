@@ -166,6 +166,17 @@ Prebuilt `dev-2300e1e` lacked `SuperUiBots/`. **Source-built mangosd** at commit
 
 ## Next milestone
 
+**Penance (WotLK Discipline Priest talent) — SHIPPED.** Custom spell entries
+40010 (R1 damage) / 40011 (R2 damage) / 40012 (R1 tick) / 40013 (R2 tick) /
+40014 (R1 heal tick) / 40015 (R1 heal) / 40016 (R2 heal tick) / 40017 (R2 heal)
+loaded into `spell_template` at `build=5875`. Implemented via the existing
+vanilla `SPELL_AURA_PERIODIC_TRIGGER_SPELL` pattern (compare Arcane Missiles
+spell 5143) — no custom C++ script required. Two separate main spells
+(target enemy vs target ally) match WotLK's 47540/47788 dual-entry approach.
+Trainer wiring: `npc_trainer_template` entry=8 (Priest class trainer) at
+level 40 (1g) / level 70 (1.5g). Plan: [`docs/TODO-FEAT-PENANCE.md`](docs/TODO-FEAT-PENANCE.md).
+Migration: `vendor/sql/migrations/20260816081942_world.sql`.
+
 **MCP server** (status: Phase 1–6 SHIPPED in commit `50ed641` / submodule
 `0e35de2`). Next moves if you want to keep extending it:
 
